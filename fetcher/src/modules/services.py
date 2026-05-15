@@ -61,11 +61,11 @@ def browser_fetch(url: str, worker_id: int) -> BeautifulSoup | None:
         @browser(  # type: ignore[misc]
             output=None,
             headless=True,
-            wait_for_complete_page_load=True,
+            wait_for_complete_page_load=False,  # some pages never signal "complete"
         )
         def _scrap(driver: Driver, _data):  # type: ignore[no-untyped-def]
             log.info("  [Worker %s] Browser navigating to %s", worker_id, url)
-            driver.get(url)  # type: ignore[no-untyped-call]
+            driver.get(url, timeout=30)  # type: ignore[no-untyped-call]
             driver.short_random_sleep()  # type: ignore[no-untyped-call]
             return soupify(driver)  # type: ignore[no-untyped-call]
 

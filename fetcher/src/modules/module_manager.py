@@ -24,6 +24,7 @@ from modules.registry import get_module
 from modules.services import browser_fetch, http_fetch
 
 if TYPE_CHECKING:
+    from bs4 import BeautifulSoup
     from mypostgres import MyPostgres
     from myredis import MyRedis
 
@@ -78,18 +79,31 @@ class ModuleManager:
         module.domain = domain  # ensure domain is set for fallbacks
 
         # ── Fetch the page ────────────────────────────────────
-        soup = await self._fetch_page(url, domain)
+        soup = await self._fetch_page(url, domain, module, depth, max_depth, seed)
         if soup is None:
             _jlog(self.worker_id, "fetch_failed", url=url, retries=retries)
             await self._handle_failure(task, "fetch returned empty")
             self._stats.failed += 1
             return
 
+        # ── Link-aware listing detection ────────────────────
+        # Check BEFORE extraction: a page with many in-scope links
+        # is a listing/hub page regardless of what extract() returns.
+        is_listing = (
+            depth < max_depth
+            and module.is_listing_page(soup, url, seed)
+        )
+
         # ── Try extraction (article detection) ─────────────────
-        article_data = module.extract(soup, url)
-        if article_data is not None:
-            await self._store_article(article_data)
-            self._stats.stored += 1
+        if not is_listing:
+            article_data = module.extract(soup, url)
+            if article_data is not None:
+                await self._store_article(article_data)
+                self._stats.stored += 1
+                _jlog(self.worker_id, "article_stored", url=url,
+                      hash=article_data.content_hash[:12])
+        else:
+            _jlog(self.worker_id, "listing_page", url=url)
 
         # ── Always extract links (if depth allows) ─────────────
         if depth < max_depth:
@@ -100,15 +114,39 @@ class ModuleManager:
         self._stats.processed += 1
         await self._maybe_log_stats()
 
-    # ── fetch (HTTP-first with browser cache) ─────────────────────
+    # ── fetch (HTTP-first with browser cache + link-aware fallback) ─
 
-    async def _fetch_page(self, url: str, domain: str):
-        """HTTP-first; fall back to headless browser if needed (cached per domain)."""
+    # Minimum number of in-scope links expected on a non-article (listing)
+    # page.  If an HTTP fetch yields fewer, we re-fetch via browser.
+    MIN_LISTING_LINKS = 3
+
+    async def _fetch_page(
+        self, url: str, domain: str, module: BaseModule,
+        depth: int, max_depth: int, seed: str,
+    ) -> BeautifulSoup | None:
+        """HTTP-first; fall back to headless browser if needed.
+
+        The fallback triggers when:
+        * HTTP fetch returns ``None``; or
+        * HTTP soup has no meaningful content; or
+        * HTTP soup has content but suspiciously few in-scope links
+          (likely a JS-rendered listing page).
+        """
         # 1 — Try HTTP if we haven't cached this domain as browser-only.
         if domain not in self._browser_required_cache:
             soup = http_fetch(url)
             if soup is not None and self._has_meaningful_content(soup):
-                return soup
+                # Got content — but does it have enough links if we're
+                # supposed to be discovering more pages?
+                if depth < max_depth:
+                    links = module.extract_links(soup, url, seed)
+                    if len(links) >= self.MIN_LISTING_LINKS:
+                        return soup
+                    # Sparse links → probably a JS shell; fall through to browser.
+                    _jlog(self.worker_id, "sparse_links_http", url=url,
+                          link_count=len(links))
+                else:
+                    return soup  # at max depth, we don't care about links
 
         # 2 — Browser fallback.
         self._browser_required_cache.add(domain)
@@ -158,13 +196,6 @@ class ModuleManager:
                 )
             )
             await session.commit()
-
-        _jlog(
-            self.worker_id,
-            "article_stored",
-            url=data.url,
-            hash=data.content_hash[:12],
-        )
 
     # ── link discovery & enqueue ───────────────────────────────────
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -50,6 +50,16 @@ class BaseModule:
 
     domain: str = ""  # e.g. "reuters.com" — set in subclass or by registry
 
+    # ── Minimum character count for article content.  Pages with very
+    # short content (e.g. listing/category pages that happen to have an
+    # <h1> and a one-line description) are treated as non-articles.
+    MIN_CONTENT_LENGTH: int = 120
+
+    # Pages with this many or more in-scope links are treated as listing
+    # pages regardless of extractable content (article pages rarely link
+    # to many other in-scope pages).
+    MAX_ARTICLE_LINKS: int = 4
+
     # ── public API ────────────────────────────────────────────────
 
     def extract(
@@ -60,13 +70,14 @@ class BaseModule:
         """Attempt to extract structured article data.
 
         Returns ``None`` if the page does not appear to be an article
-        (no headline and no content found).  This ``None`` is used by
-        the pipeline as the signal that the page is a *listing* page.
+        (no headline / content, content too short, or too many in-scope
+        links suggesting a listing page).
         """
         headline = self._extract_headline(soup)
         content = self._extract_content(soup)
 
-        if not headline and not content:
+        # Must have both headline AND substantial content to be an article.
+        if not content or len(content) < self.MIN_CONTENT_LENGTH:
             return None  # listing / non-article page
 
         return ArticleData(
@@ -76,20 +87,37 @@ class BaseModule:
             content=content,
         )
 
+    def is_listing_page(self, soup: BeautifulSoup, url: str, seed_prefix: str) -> bool:
+        """Return True if the page has characteristics of a listing/hub page.
+
+        Primary signal: a high number of in-scope links.
+        """
+        links = self.extract_links(soup, url, seed_prefix)
+        return len(links) >= self.MAX_ARTICLE_LINKS
+
     def extract_links(self, soup: BeautifulSoup, url: str, seed_prefix: str) -> list[str]:
         """Return all in-scope ``<a href>`` URLs whose href starts with
-        *seed_prefix*.  Deduplicated within the page.
+        *seed_prefix*.  Deduplicated within the page.  Filters out
+        fragment-only URLs (``#…``) and the current page itself.
         """
         seen: set[str] = set()
         links: list[str] = []
+        stripped_url = url.rstrip("/")
 
         for a in soup.find_all("a", href=True):
             href: str = a["href"]  # type: ignore[assignment]
             absolute = urljoin(url, href)
-            # Keep only URLs under the seed prefix and within the same domain.
-            if absolute.startswith(seed_prefix) and absolute not in seen:
-                seen.add(absolute)
-                links.append(absolute)
+
+            # Skip fragment-only links and self-references.
+            parsed = urlparse(absolute)
+            clean = parsed._replace(fragment="").geturl().rstrip("/")
+            if not clean or clean == stripped_url:
+                continue
+
+            # Keep only URLs under the seed prefix.
+            if clean.startswith(seed_prefix) and clean not in seen:
+                seen.add(clean)
+                links.append(clean)
 
         return links
 

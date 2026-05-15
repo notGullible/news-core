@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/mnt/shared_ssd/Projects/NG/core/fetcher/.venv/lib/python3.14/site-packages/botasaurus/browser_decorator.py", line 199, in run_task
+    result = func(driver, data)
+  File "/mnt/shared_ssd/Projects/NG/core/fetcher/src/modules/services.py", line 68, in _scrap
+    driver.get(url)  # type: ignore[no-untyped-call]
+    ~~~~~~~~~~^^^^^
+  File "/mnt/shared_ssd/Projects/NG/core/fetcher/.venv/lib/python3.14/site-packages/botasaurus_driver/driver.py", line 2174, in get
+    wait_till_document_is_ready(self._tab, self.config.wait_for_complete_page_load, timeout=timeout)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/shared_ssd/Projects/NG/core/fetcher/.venv/lib/python3.14/site-packages/botasaurus_driver/solve_cloudflare_captcha.py", line 40, in wait_till_document_is_ready
+    raise TimeoutError(f"Document did not become ready within {timeout} seconds")
+TimeoutError: Document did not become ready within 60 seconds
