@@ -1,63 +1,119 @@
-# Handles workers, creation and management
+"""
+Worker lifecycle — spawns N subprocess workers, each running an infinite
+async loop that dequeues tasks from Redis, processes them through the
+:class:`ModuleManager`, and re-enqueues discovered links.
+
+Each worker:
+* Connects to Redis and PostgreSQL on startup.
+* Creates a :class:`ModuleManager` that owns the full pipeline.
+* Sleeps a random politeness delay between tasks.
+* Handles graceful shutdown via SIGINT / SIGTERM.
+"""
+
+from __future__ import annotations
+
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures import ThreadPoolExecutor
 import logging
-from typing import Union
+import random
 import signal
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from typing import Union
 
 import config
 from modules.module_manager import ModuleManager
+from mypostgres import MyPostgres
 from myredis import MyRedis
 
 log = logging.getLogger(__name__)
 
-# Let the Caller Set the params
-async def start_workers(PoolExecutor:Union[ProcessPoolExecutor, ThreadPoolExecutor]):   
+
+# ── public entry point ─────────────────────────────────────────────────
+
+
+async def start_workers(
+    pool_executor: Union[ProcessPoolExecutor, ThreadPoolExecutor],
+) -> None:
+    """Launch *config.NUMBER_OF_WORKERS* workers and wait forever."""
     loop = asyncio.get_running_loop()
-    futures = [PoolExecutor.submit(_call_workers, i) for i in range(config.NUMBER_OF_WORKERS)]
+    futures = [
+        pool_executor.submit(_call_worker, i)
+        for i in range(config.NUMBER_OF_WORKERS)
+    ]
     awaitables = [asyncio.wrap_future(f, loop=loop) for f in futures]
-    await asyncio.gather(*awaitables)  # blocks forever (workers are infinite loops)
+    await asyncio.gather(*awaitables)  # blocks forever
 
-def stop_workers():
-    # TODO: I dont think we need it ? SIGTERM is sent.
-    # But need it for when errors are generated
-    pass
 
-def _call_workers(worker_id:int):    
-    asyncio.run(_workers(worker_id))
+# ── internal helpers ───────────────────────────────────────────────────
 
-async def _workers(worker_id:int):
-    # TODO: Modify the logging config to auto : "   %(asctime)s | %(message)s | [{worker_id}] | "
-    # No need for " [Fetcher][{working_id}] ..."
-    # logging.basicConfig(level=logging.INFO, format=f"   %(asctime)s | %(message)s | [{worker_id}] | ")
 
-    log.info(f"  [Fetcher][{worker_id}] !! Connecting to the REDIS Server")
-    log.info(f"  [Fetcher][{worker_id}] !! Host: {config.REDIS_DB_HOST} | Port: {config.REDIS_DB_PORT}")
+def _call_worker(worker_id: int) -> None:
+    """Entry-point for each subprocess — boots the asyncio loop."""
+    asyncio.run(_worker(worker_id))
+
+
+async def _worker(worker_id: int) -> None:
+    """Infinite loop: connect → dequeue → process → repeat."""
+
+    # ── Setup ─────────────────────────────────────────────────
+    log.info("  [Fetcher][%s] Connecting to Redis …", worker_id)
     myredis = MyRedis()
     if not await myredis.init_redis():
-        log.critical(f"  [Fetcher][{worker_id}] Couldnt connect to REDIS")
+        log.critical("  [Fetcher][%s] Redis unreachable — aborting", worker_id)
         return
-    
+
+    log.info("  [Fetcher][%s] Connecting to PostgreSQL …", worker_id)
+    mypostgres = MyPostgres()
+    if not await mypostgres.init_db():
+        log.critical("  [Fetcher][%s] PostgreSQL unreachable — aborting", worker_id)
+        await myredis.close_redispool()
+        return
+
+    module_manager = ModuleManager(
+        worker_id=worker_id,
+        myredis=myredis,
+        mypostgres=mypostgres,
+    )
+
+    # ── Signal handling ───────────────────────────────────────
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
-    loop.add_signal_handler(signal.SIGINT, main_task.cancel) # type: ignore
-    loop.add_signal_handler(signal.SIGTERM, main_task.cancel) # type: ignore
-    
-    log.info(f"  [Fetcher][{worker_id}] Connected to Redis (pool: {config.REDIS_POOL_MIN}-{config.REDIS_POOL_MAX} connections)")
-    log.info(f"  [Fetcher][{worker_id}] Listening to incoming requests on stream: {config.REDIS_STREAM}")
-    
-    module_manager = ModuleManager(worker_id=worker_id)
+    loop.add_signal_handler(signal.SIGINT, main_task.cancel)  # type: ignore[arg-type]
+    loop.add_signal_handler(signal.SIGTERM, main_task.cancel)  # type: ignore[arg-type]
 
+    log.info(
+        "  [Fetcher][%s] Ready — listening on stream '%s' (group: %s, consumer: worker-%s)",
+        worker_id,
+        config.REDIS_STREAM,
+        config.REDIS_STREAM_GROUP,
+        worker_id,
+    )
+
+    consumer_name = f"worker-{worker_id}"
+
+    # ── Main loop ─────────────────────────────────────────────
     try:
         while True:
-            res = await myredis.dequeue_stream_next(config.REDIS_STREAM)
-            if res:
-                await myredis.delete_msg_stream(config.REDIS_STREAM, res["msg_id"])
-                log.info(f"  [Fetcher][{worker_id}] Processing {res['msg_id']}: {res['data']}")
-                output = module_manager.fetch(res['data'])
-                log.info(f"  [Fetcher][{worker_id}] Done {res['msg_id']} | Output:{output}")
+            res = await myredis.dequeue_stream_next(config.REDIS_STREAM, consumer_name)
+            if not res:
+                continue
+
+            msg_id = res["msg_id"]
+            data = res["data"]
+
+            url = data.get("site", "?")
+            log.info("  [Fetcher][%s] Processing [%s] %s", worker_id, msg_id, url)
+
+            await module_manager.process(data)
+
+            # ACK: mark as processed within the consumer group.
+            await myredis.ack_stream(config.REDIS_STREAM, msg_id)
+
+            # Politeness delay between tasks.
+            delay = random.uniform(config.REQUEST_DELAY_MIN, config.REQUEST_DELAY_MAX)
+            await asyncio.sleep(delay)
+
     except asyncio.CancelledError:
-        log.info("Shutting down...")
+        log.info("  [Fetcher][%s] Shutting down …", worker_id)
     finally:
-        await myredis.close_redispool() # Nukes the entire connection pool
+        await mypostgres.close_db()
+        await myredis.close_redispool()
