@@ -18,6 +18,7 @@ from ..base import BaseModule
 from ..registry import register_module
 from . import const
 from modules.services import STEALTH_ARGUMENTS  # noqa: PLC0415
+from modules.services import browser_click_and_load
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -238,33 +239,13 @@ class ReutersModule(BaseModule):
         ``const.MAX_LISTING_PAGES`` times) to expand the page.
         Finally extracts in-scope article links and yields them.
         """
-        # Closure so the @browser decorator (which injects driver,
-        # data as first args) can capture url/seed from outer scope.
-        @browser(
-            output=None,
-            headless=True,
-            wait_for_complete_page_load=False,
-            add_arguments=STEALTH_ARGUMENTS,
-        )
-        def _click(driver: Driver, _data) -> list[str]:
-            driver.get(url, timeout=30)
-            driver.short_random_sleep()
-            driver.sleep(2)
-
-            for _ in range(const.MAX_LISTING_PAGES):
-                if not driver.is_element_present(_LOAD_MORE_SELECTOR):
-                    break
-                try:
-                    driver.click(_LOAD_MORE_SELECTOR)
-                    driver.sleep(1.5)
-                except Exception:
-                    break
-
-            soup = soupify(driver)
+        
+        def _click() -> list[str]:
+            soup = browser_click_and_load(url=url, btn=_LOAD_MORE_SELECTOR, elem=_LOAD_MORE_SELECTOR, max_clicks=const.MAX_LISTING_PAGES)
             return self.extract_links(soup, url, seed_prefix)
 
         try:
-            links = await asyncio.to_thread(_click)
+            links = await asyncio.to_thread(_click,)
         except Exception:
             log.exception("Listing-page browser session failed for %s", url)
             return

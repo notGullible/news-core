@@ -44,3 +44,8 @@ all: up seed scrape
 # Tests
 test:
 	cd fetcher && uv run python test_reuters_module.py
+
+
+# Viewer
+viewer:
+	cd viewer/src && uv run uvicorn main:app --host 0.0.0.0 --port 8080

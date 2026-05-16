@@ -88,3 +88,45 @@ def browser_fetch(url: str, worker_id: int) -> BeautifulSoup | None:
     except Exception:
         log.exception("Browser fetch failed for %s", url)
         return None
+
+
+
+def browser_click_and_load(url:str, btn:str, elem:str, max_clicks:int) -> BeautifulSoup:
+    """Fetch *url* via a headless Chrome browser and return the parsed HTML.
+
+    Applies anti-detection measures: disables AutomationControlled blink
+    feature (hides ``navigator.webdriver``).  Does **not** override the
+    user-agent — botasaurus already patches the default UA to remove
+    "Headless" markers.
+
+    Finds and clicks the provided `btn` element for `max_clicks` or until `element` is not visible
+    
+    Returns ``None`` on failure.  The browser is automatically closed after
+    the call completes.
+    """
+    # Closure so the @browser decorator (which injects driver,
+    # data as first args) can capture url/seed from outer scope.
+    @browser(
+        output=None,
+        headless=True,
+        wait_for_complete_page_load=False,
+        add_arguments=STEALTH_ARGUMENTS,
+    )
+    def browse(driver: Driver, data_):
+        driver.get(url, timeout=30)
+        driver.short_random_sleep()
+        driver.sleep(2)
+
+        for _ in range(max_clicks):
+            if not driver.is_element_present(elem):
+                break
+            try:
+                driver.click(btn)
+                driver.sleep(1.5)
+            except Exception as e:
+                log.exception(f"Failed to click: {btn}. For url {url}. Exception: {e}")
+                break
+
+        return soupify(driver)
+    return browse() # pyright: ignore[reportCallIssue]
+    
