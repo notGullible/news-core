@@ -90,8 +90,8 @@ class ReutersModule(BaseModule):
         container = None
         for div in soup.find_all(
             "div",
-            class_=lambda c: c and "article-body-module__container__" in c,
-        ):
+            class_=lambda c: c and "article-body-module__container__" in c, # type: ignore
+        ): # type: ignore
             container = div
             break
 
@@ -105,9 +105,9 @@ class ReutersModule(BaseModule):
         content_div = None
         for div in container.find_all(
             "div",
-            class_=lambda c: c and "article-body-module__content__" in c,
+            class_=lambda c: c and "article-body-module__content__" in c, # type: ignore
             recursive=False,
-        ):
+        ): # pyright: ignore[reportCallIssue]
             content_div = div
             break
 
@@ -135,7 +135,7 @@ class ReutersModule(BaseModule):
                 continue
 
             # ── Paragraph blocks ────────────────────────────
-            if tid.startswith("paragraph-"):
+            if tid.startswith("paragraph-"): # type: ignore
                 text = self._clean_text(_txt(child))
                 if text:
                     parts.append(text)
@@ -160,8 +160,8 @@ class ReutersModule(BaseModule):
                 # Remove visually-hidden accessibilty text first.
                 for hidden in child.find_all(
                     "span",
-                    style=lambda s: s and "clip:rect" in s,
-                ):
+                    style=lambda s: s and "clip:rect" in s, # type: ignore
+                ): # pyright: ignore[reportCallIssue]
                     hidden.decompose()
                 text = self._clean_text(_txt(child))
                 if text and ("Our Standards" in text or "Trust Principles" in text):
@@ -241,7 +241,7 @@ class ReutersModule(BaseModule):
             prop = meta.get("property", "")
             name = meta.get("name", "")
             if prop == "article:section" or name in ("article:section", "section"):
-                return meta.get("content")
+                return meta.get("content") # pyright: ignore[reportReturnType]
 
         # 2 — Reuters breadcrumb / section link.
         for sel in (

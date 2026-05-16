@@ -291,7 +291,7 @@ class BaseModule:
                     else selector.get_text()
                 )
                 if text:
-                    return text.strip()
+                    return text.strip() # pyright: ignore[reportAttributeAccessIssue]
         return None
 
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
@@ -358,11 +358,11 @@ class BaseModule:
                 "date",
                 "parsely-pub-date",
             ):
-                return meta.get("content")
+                return meta.get("content") # pyright: ignore[reportReturnType]
 
         time_el = soup.find("time")
         if time_el:
-            return time_el.get("datetime") or time_el.get_text(strip=True)
+            return time_el.get("datetime") or time_el.get_text(strip=True) # pyright: ignore[reportReturnType]
         return None
 
     def _extract_author(self, soup: BeautifulSoup) -> str | None:
@@ -371,7 +371,7 @@ class BaseModule:
             name = meta.get("name", "")
             prop = meta.get("property", "")
             if name in ("author", "article:author", "sailthru.author") or prop == "article:author":
-                return meta.get("content")
+                return meta.get("content") # pyright: ignore[reportReturnType]
 
         for cls in ("article__author", "byline", "author-name", "ArticleHeader_author"):
             el = soup.find(class_=cls)
@@ -385,7 +385,7 @@ class BaseModule:
             prop = meta.get("property", "")
             name = meta.get("name", "")
             if prop == "article:section" or name in ("article:section", "section"):
-                return meta.get("content")
+                return meta.get("content") # pyright: ignore[reportReturnType]
 
         for sel in (
             "a[data-testid='Section']",
