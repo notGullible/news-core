@@ -3,21 +3,13 @@ Reuters site module — extends :class:`BaseModule` with Reuters-specific
 headline cleanup and section extraction.
 """
 
-from __future__ import annotations
-
 import asyncio
-import json
 import logging
 from typing import TYPE_CHECKING, AsyncIterator
-from urllib.parse import urljoin
-
-from botasaurus.browser import browser, Driver  # type: ignore[import-untyped]
-from botasaurus.soupify import soupify  # type: ignore[import-untyped]
 
 from ..base import BaseModule
 from ..registry import register_module
 from . import const
-from modules.services import STEALTH_ARGUMENTS  # noqa: PLC0415
 from modules.services import browser_click_and_load
 
 if TYPE_CHECKING:
@@ -35,13 +27,6 @@ def _normalise_path(url: str) -> str:
     from urllib.parse import urlparse
     return urlparse(url).path.rstrip("/") + "/"
 
-
-# ── Reuters "load more" API base URL ───────────────────────────────
-_API_BASE = (
-    "https://www.reuters.com/pf/api/v3/content/fetch/"
-    "articles-by-collection-alias-or-id-v1"
-)
-
 # CSS selector for the "Load more articles" button on listing pages.
 _LOAD_MORE_SELECTOR = 'button[data-testid="FeedContentLoadMore"]'
 
@@ -50,9 +35,11 @@ _LOAD_MORE_SELECTOR = 'button[data-testid="FeedContentLoadMore"]'
 class ReutersModule(BaseModule):
     """Extraction logic tailored for www.reuters.com."""
 
+    # Used for limiting the nummber of links added from the extract_listings_links method
     MAX_ARTICLE_LINKS: int = const.MAX_ARTICLE_LINKS
-
-    # ── headline ────────────────────────────────────────────────
+    
+    # Zero-width / invisible characters that Reuters inserts into text.
+    _INVISIBLE_CHARS:str = "\u200b\u200c\u200d\u2060\ufeff"
 
     def _extract_headline(self, soup: BeautifulSoup) -> str | None:
         text = super()._extract_headline(soup)
@@ -63,18 +50,14 @@ class ReutersModule(BaseModule):
                     text = text[: -len(suffix)]
         return text
 
-    # ── content (Reuters-specific: paragraphs via data-testid) ─
 
-    # Zero-width / invisible characters that Reuters inserts into text.
-    _INVISIBLE_CHARS = "\u200b\u200c\u200d\u2060\ufeff"
-
-    @staticmethod
-    def _clean_text(text: str) -> str:
+    @classmethod
+    def _clean_text(cls, text: str) -> str:
         """Normalise whitespace and strip invisible Unicode characters."""
         # Collapse runs of whitespace (including &nbsp; → space).
         cleaned = " ".join(text.split())
         # Remove zero-width spaces, word-joiners, BOM, etc.
-        for ch in ReutersModule._INVISIBLE_CHARS:
+        for ch in cls._INVISIBLE_CHARS:
             cleaned = cleaned.replace(ch, "")
         return cleaned
 
@@ -208,7 +191,6 @@ class ReutersModule(BaseModule):
 
         return "\n\n".join(parts) if parts else None
 
-    # ── listing-page detection ──────────────────────────────
 
     def is_listing_page(
         self, soup: BeautifulSoup, url: str, seed_prefix: str
@@ -228,7 +210,6 @@ class ReutersModule(BaseModule):
         return super().is_listing_page(soup, url, seed_prefix)
 
     # ── listing-page link discovery (click "Load more") ──
-
     async def extract_listings_links(
         self, soup: BeautifulSoup, url: str, seed_prefix: str
     ) -> AsyncIterator[str]:
@@ -254,7 +235,6 @@ class ReutersModule(BaseModule):
             yield link
 
     # ── section ─────────────────────────────────────────────────
-
     def _extract_section(self, soup: BeautifulSoup) -> str | None:
         # 1 — meta tags.
         for meta in soup.find_all("meta"):
@@ -276,7 +256,6 @@ class ReutersModule(BaseModule):
         return None
 
     # ── author (Reuters-specific byline) ─────────────────────────
-
     def _extract_author(self, soup: BeautifulSoup) -> str | None:
         # Try parent implementation first (meta tags, common classes).
         result = super()._extract_author(soup)

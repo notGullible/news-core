@@ -53,7 +53,7 @@ COLLECTION_ALIAS_OVERRIDES: dict[str, str] = {
 # ── API pagination tunables ─────────────────────────────────────────
 
 LISTING_PAGE_SIZE: int = 10   # articles returned per API call
-MAX_LISTING_PAGES: int = 5    # safety cap — 5 × 10 = 50 articles max
+MAX_LISTING_PAGES: int = 1000    # safety cap — 5 × 10 = 50 articles max
 
 # Threshold for the link-count fallback in ``is_listing_page``.
 # Reuters article pages carry 4–15 related-story sidebar links;
