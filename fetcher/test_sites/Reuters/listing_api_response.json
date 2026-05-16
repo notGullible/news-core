@@ -1,0 +1,35 @@
+{
+  "statusCode": 200,
+  "message": "Success",
+  "result": {
+    "pagination": {
+      "size": 10,
+      "expected_size": 10,
+      "total_size": 10
+    },
+    "date_modified": "2026-05-12T02:23:02.025Z",
+    "title": "World - Middle East - NEW",
+    "fetch_type": "collection",
+    "articles": [
+      {
+        "id": "FGD53YOVXVORHEHE4H7AJIH2UQ",
+        "canonical_url": "/world/middle-east/uk-sanctions-iran-linked-network-2026-05-11/",
+        "website": "reuters",
+        "title": "UK sanctions Iran-linked network, cites attack plots and finance operations"
+      },
+      {
+        "id": "SCSZHB7GGZLCLGENQ3TTDPLXHQ",
+        "canonical_url": "/world/americas/brazilian-flotilla-activist-returns-home-2026-05-12/",
+        "website": "reuters",
+        "title": "Brazilian flotilla activist returns home, alleges torture during Israel detention"
+      },
+      {
+        "id": "EYTXMKO3UFIS3JGJOMCWBDP6QI",
+        "canonical_url": "/world/middle-east/uae-has-been-secretly-carrying-out-attacks-iran-2026-05-11/",
+        "website": "reuters",
+        "title": "UAE has been secretly carrying out attacks on Iran, WSJ reports"
+      }
+    ]
+  },
+  "_id": "c8d7e26c040db461df260e6831ab0a83a6826bf0013f6e2a898359a027e6e727"
+}

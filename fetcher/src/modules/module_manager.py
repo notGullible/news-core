@@ -119,7 +119,7 @@ class ModuleManager:
             if depth < max_depth:
                 total_count = 0
                 unique_count = 0
-                for link in module.extract_listings_links(soup, url, seed):
+                async for link in module.extract_listings_links(soup, url, seed):
                     _jlog(self.worker_id, "listing_link_found",
                         url=url, link=link, depth=depth)
                     unique_count += await self._enqueue_links([link], depth + 1, seed, max_depth)

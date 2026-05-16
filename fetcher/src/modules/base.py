@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, AsyncIterator
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -241,11 +241,17 @@ class BaseModule:
 
         return links
     
-    def extract_listings_links(self, soup: BeautifulSoup, url: str, seed_prefix: str) -> Iterator[str]:
+    async def extract_listings_links(
+        self, soup: BeautifulSoup, url: str, seed_prefix: str
+    ) -> AsyncIterator[str]:
         """Yield in-scope ``<a href>`` URLs whose href starts with
         *seed_prefix*.  Deduplicated within the page.  Filters out
         fragment-only URLs (``#…``), self-references, JavaScript
         placeholders (``undefined``), and other malformed URLs.
+
+        This is an **async generator** so that site-specific overrides
+        can perform async I/O (e.g. paginated API calls, "load more"
+        button interaction) while yielding links one at a time.
         """
         seen: set[str] = set()
         stripped_url = url.rstrip("/")

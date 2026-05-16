@@ -5,13 +5,36 @@ headline cleanup and section extraction.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import logging
+from typing import TYPE_CHECKING, AsyncIterator
+from urllib.parse import urljoin
 
 from ..base import BaseModule
 from ..registry import register_module
+from . import const
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
+
+log = logging.getLogger(__name__)
+
+
+def _normalise_path(url: str) -> str:
+    """Return the normalised path of *url* for comparison.
+
+    ``/world/middle-east/`` and ``/world/middle-east?p=1`` both
+    produce ``/world/middle-east/``.
+    """
+    from urllib.parse import urlparse
+    return urlparse(url).path.rstrip("/") + "/"
+
+
+# ── Reuters "load more" API base URL ───────────────────────────────
+_API_BASE = (
+    "https://www.reuters.com/pf/api/v3/content/fetch/"
+    "articles-by-collection-alias-or-id-v1"
+)
 
 
 @register_module(domain="reuters.com")
@@ -173,6 +196,89 @@ class ReutersModule(BaseModule):
                 continue
 
         return "\n\n".join(parts) if parts else None
+
+    # ── listing-page detection ──────────────────────────────
+
+    def is_listing_page(
+        self, soup: BeautifulSoup, url: str, seed_prefix: str
+    ) -> bool:
+        """Return True if *url* is a known Reuters listing/category page.
+
+        Checks ``const.LISTING_URL_PREFIXES`` via path-equality (not
+        prefix match — articles live under the same path prefix).
+        Falls back to the default link-count heuristic for unmatched
+        URLs so that new sections are detected even without a
+        ``const.py`` entry.
+        """
+        path = _normalise_path(url)
+        for prefix in const.LISTING_URL_PREFIXES:
+            if path == _normalise_path(prefix):
+                return True
+        return super().is_listing_page(soup, url, seed_prefix)
+
+    # ── listing-page link discovery (browser-based API) ────
+
+    async def extract_listings_links(
+        self, soup: BeautifulSoup, url: str, seed_prefix: str
+    ) -> AsyncIterator[str]:
+        """Yield article URLs from the Reuters collection API.
+
+        Loads each page of the API JSON response via headless Chrome
+        (which carries the valid browser session cookies), parses the
+        JSON from the rendered text, and yields ``canonical_url``
+        entries filtered by *seed_prefix*.
+
+        Paginates until exhausted or ``const.MAX_LISTING_PAGES``
+        batches have been fetched.
+        """
+        alias = const.resolve_alias(url)
+        if not alias:
+            log.warning("Could not resolve collection_alias for %s", url)
+            return
+
+        offset = 0
+        pages = 0
+        while pages < const.MAX_LISTING_PAGES:
+            api_url = (
+                f"{_API_BASE}"
+                f"?collection_alias={alias}"
+                f"&offset={offset}"
+                f"&size={const.LISTING_PAGE_SIZE}"
+                f"&website=reuters&d=362&mxId=00000000&_website=reuters"
+            )
+
+            # Load the JSON response in a browser (cookies from the
+            # listing-page session are needed to pass the CAPTCHA).
+            api_soup = self._try_browser_fetch(api_url, worker_id=-1)
+            if api_soup is None:
+                log.warning("Browser fetch failed for API url %s", api_url)
+                return
+
+            # The browser renders JSON as plain text inside <body>.
+            raw = api_soup.get_text(strip=True)
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                log.warning("Failed to parse API JSON for %s (offset=%s)",
+                            alias, offset)
+                return
+
+            articles = data.get("result", {}).get("articles") or []
+            if not articles:
+                break
+
+            for article in articles:
+                canonical: str | None = article.get("canonical_url")
+                if canonical:
+                    absolute = urljoin("https://www.reuters.com/", canonical)
+                    if absolute.startswith(seed_prefix):
+                        yield absolute
+
+            if len(articles) < const.LISTING_PAGE_SIZE:
+                break
+
+            offset += const.LISTING_PAGE_SIZE
+            pages += 1
 
     # ── section ─────────────────────────────────────────────────
 
