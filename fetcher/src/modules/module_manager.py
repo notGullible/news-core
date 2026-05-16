@@ -104,17 +104,30 @@ class ModuleManager:
                 self._stats.stored += 1
                 _jlog(self.worker_id, "article_stored", url=url,
                       hash=article_data.content_hash[:12])
+            
+            # ── Always extract links (if depth allows) ─────────────
+            if depth < max_depth:
+                links = module.extract_links(soup, url, seed)
+                self._stats.links_discovered += len(links)
+                new_count = await self._enqueue_links(links, depth + 1, seed, max_depth)
+                _jlog(self.worker_id, "links_summary",
+                    url=url, found=len(links), enqueued=new_count, depth=depth)
+
+        
+        # ── Extract all links from this Listing Page ─────────────────
         else:
-            _jlog(self.worker_id, "listing_page", url=url)
-
-        # ── Always extract links (if depth allows) ─────────────
-        if depth < max_depth:
-            links = module.extract_links(soup, url, seed)
-            self._stats.links_discovered += len(links)
-            new_count = await self._enqueue_links(links, depth + 1, seed, max_depth)
-            _jlog(self.worker_id, "links_summary",
-                  url=url, found=len(links), enqueued=new_count, depth=depth)
-
+            if depth < max_depth:
+                total_count = 0
+                unique_count = 0
+                for link in module.extract_listings_links(soup, url, seed):
+                    _jlog(self.worker_id, "listing_link_found",
+                        url=url, link=link, depth=depth)
+                    unique_count += await self._enqueue_links([link], depth + 1, seed, max_depth)
+                    total_count += 1
+                self._stats.links_discovered += total_count
+                _jlog(self.worker_id, "listing_page",
+                    url=url, found=total_count, enqueued=unique_count, depth=depth)
+        
         self._stats.processed += 1
         await self._maybe_log_stats()
 

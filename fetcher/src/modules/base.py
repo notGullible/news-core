@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -240,6 +240,34 @@ class BaseModule:
                 links.append(clean)
 
         return links
+    
+    def extract_listings_links(self, soup: BeautifulSoup, url: str, seed_prefix: str) -> Iterator[str]:
+        """Yield in-scope ``<a href>`` URLs whose href starts with
+        *seed_prefix*.  Deduplicated within the page.  Filters out
+        fragment-only URLs (``#…``), self-references, JavaScript
+        placeholders (``undefined``), and other malformed URLs.
+        """
+        seen: set[str] = set()
+        stripped_url = url.rstrip("/")
+
+        for a in soup.find_all("a", href=True):
+            href: str = a["href"]  # type: ignore[assignment]
+            absolute = urljoin(url, href)
+
+            # Skip fragment-only links and self-references.
+            parsed = urlparse(absolute)
+            clean = parsed._replace(fragment="").geturl().rstrip("/")
+            if not clean or clean == stripped_url:
+                continue
+
+            # Skip JavaScript artifacts and malformed URLs.
+            if "/undefined" in clean or "javascript:" in clean.lower():
+                continue
+
+            # Keep only URLs under the seed prefix.
+            if clean.startswith(seed_prefix) and clean not in seen:
+                seen.add(clean)
+                yield clean
 
     # ── shared extraction helpers (override in subclass) ──────────
 
