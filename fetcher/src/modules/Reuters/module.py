@@ -49,6 +49,8 @@ _LOAD_MORE_SELECTOR = 'button[data-testid="FeedContentLoadMore"]'
 class ReutersModule(BaseModule):
     """Extraction logic tailored for www.reuters.com."""
 
+    MAX_ARTICLE_LINKS: int = const.MAX_ARTICLE_LINKS
+
     # ── headline ────────────────────────────────────────────────
 
     def _extract_headline(self, soup: BeautifulSoup) -> str | None:
