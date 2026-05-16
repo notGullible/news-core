@@ -72,11 +72,11 @@ class MyRedis:
         try:
             payload_ = cast(Dict[FieldT, EncodableT], payload)
             msg_id = await client.xadd(stream_name, payload_)
-            log.info(f"Published [{msg_id}]: {payload}")
+            log.info("Published [%s]: %s", msg_id, payload)
             return str(msg_id)
         
         except Exception as e:
-            log.warning(f"Could not publish message: {payload} as, Payload not in proper format. Error: {e}.")
+            log.warning("Could not publish message: %s. Error: %s", payload, e)
             return str("NONE")
 
 

@@ -53,7 +53,7 @@ def http_fetch(url: str) -> BeautifulSoup | None:
 
         return _fetch()  # type: ignore[no-untyped-call]
     except Exception:
-        log.exception("HTTP fetch failed for %s", url)
+        log.exception("HTTP fetch failed for %s", url, extra={"url": url})
         return None
 
 
@@ -79,14 +79,14 @@ def browser_fetch(url: str, worker_id: int) -> BeautifulSoup | None:
             add_arguments=STEALTH_ARGUMENTS,
         )
         def _scrap(driver: Driver, _data):  # type: ignore[no-untyped-def]
-            log.info("  [Worker %s] Browser navigating to %s", worker_id, url)
+            log.info("Browser navigating to %s", url, extra={"url": url})
             driver.get(url, timeout=30)  # type: ignore[no-untyped-call]
             driver.short_random_sleep()  # type: ignore[no-untyped-call]
             return soupify(driver)  # type: ignore[no-untyped-call]
 
         return _scrap()  # type: ignore[no-untyped-call]
     except Exception:
-        log.exception("Browser fetch failed for %s", url)
+        log.exception("Browser fetch failed for %s", url, extra={"url": url})
         return None
 
 
@@ -124,7 +124,7 @@ def browser_click_and_load(url:str, btn:str, elem:str, max_clicks:int) -> Beauti
                 driver.click(btn)
                 driver.sleep(1.5)
             except Exception as e:
-                log.exception(f"Failed to click: {btn}. For url {url}. Exception: {e}")
+                log.exception("Failed to click: %s. For url %s. Exception: %s", btn, url, e, extra={"url": url})
                 break
 
         return soupify(driver)

@@ -15,3 +15,4 @@ typings
 src/error_logs
 
 error_logs/
+logs/

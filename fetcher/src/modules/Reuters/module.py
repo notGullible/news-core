@@ -247,7 +247,7 @@ class ReutersModule(BaseModule):
         try:
             links = await asyncio.to_thread(_click,)
         except Exception:
-            log.exception("Listing-page browser session failed for %s", url)
+            log.exception("Listing-page browser session failed for %s", url, extra={"url": url})
             return
 
         for link in links:

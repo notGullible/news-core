@@ -20,11 +20,10 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Union
 
 import config
+from logging_config import setup_logging
 from modules.module_manager import ModuleManager
 from mypostgres import MyPostgres
 from myredis import MyRedis
-
-log = logging.getLogger(__name__)
 
 
 # ── public entry point ─────────────────────────────────────────────────
@@ -54,18 +53,24 @@ def _call_worker(worker_id: int) -> None:
 async def _worker(worker_id: int) -> None:
     """Infinite loop: connect → dequeue → process → repeat."""
 
+    # ── Logging setup (per-process) ───────────────────────────
+    flusher = setup_logging(worker_id)
+    log = logging.getLogger(__name__)
+
     # ── Setup ─────────────────────────────────────────────────
-    log.info("  [Fetcher][%s] Connecting to Redis …", worker_id)
+    log.info("Connecting to Redis …")
     myredis = MyRedis()
     if not await myredis.init_redis():
-        log.critical("  [Fetcher][%s] Redis unreachable — aborting", worker_id)
+        log.critical("Redis unreachable — aborting")
+        flusher.stop()
         return
 
-    log.info("  [Fetcher][%s] Connecting to PostgreSQL …", worker_id)
+    log.info("Connecting to PostgreSQL …")
     mypostgres = MyPostgres()
     if not await mypostgres.init_db():
-        log.critical("  [Fetcher][%s] PostgreSQL unreachable — aborting", worker_id)
+        log.critical("PostgreSQL unreachable — aborting")
         await myredis.close_redispool()
+        flusher.stop()
         return
 
     module_manager = ModuleManager(
@@ -81,8 +86,7 @@ async def _worker(worker_id: int) -> None:
     loop.add_signal_handler(signal.SIGTERM, main_task.cancel)  # type: ignore[arg-type]
 
     log.info(
-        "  [Fetcher][%s] Ready — listening on stream '%s' (group: %s, consumer: worker-%s)",
-        worker_id,
+        "Ready — listening on stream '%s' (group: %s, consumer: worker-%s)",
         config.REDIS_STREAM,
         config.REDIS_STREAM_GROUP,
         worker_id,
@@ -101,7 +105,7 @@ async def _worker(worker_id: int) -> None:
             data = res["data"]
 
             url = data.get("site", "?")
-            log.info("  [Fetcher][%s] Processing [%s] %s", worker_id, msg_id, url)
+            log.info("Processing [%s] %s", msg_id, url, extra={"url": url})
 
             await module_manager.process(data)
 
@@ -113,7 +117,8 @@ async def _worker(worker_id: int) -> None:
             await asyncio.sleep(delay)
 
     except asyncio.CancelledError:
-        log.info("  [Fetcher][%s] Shutting down …", worker_id)
+        log.info("Shutting down …")
     finally:
         await mypostgres.close_db()
         await myredis.close_redispool()
+        flusher.stop()

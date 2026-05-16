@@ -17,13 +17,14 @@ import logging
 import sys
 
 import config
+from logging_config import setup_logging
 from myredis import MyRedis
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-log = logging.getLogger("reset_redis")
 
 
 async def main() -> None:
+    flusher = setup_logging(-1)
+    log = logging.getLogger("reset_redis")
+
     redis = MyRedis()
     if not await redis.init_redis():
         log.critical("Cannot connect to Redis — aborting.")
@@ -33,6 +34,7 @@ async def main() -> None:
     deleted = await client.delete(config.REDIS_SEEN_SET)  # type: ignore[no-untyped-call]
     log.info("Deleted key '%s' (%s keys removed).", config.REDIS_SEEN_SET, deleted)
     await redis.close_redispool()
+    flusher.stop()
 
 
 if __name__ == "__main__":

@@ -16,14 +16,15 @@ import logging
 import sys
 
 # Import the reset helpers from the sibling scripts.
+from logging_config import setup_logging
 from reset_postgres import main as reset_pg
 from reset_redis import main as reset_redis
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-log = logging.getLogger("reset_all")
-
 
 async def main(bad_only: bool) -> None:
+    flusher = setup_logging(-1)
+    log = logging.getLogger("reset_all")
+
     log.info("=== Clearing Redis dedup set ===")
     await reset_redis()
 

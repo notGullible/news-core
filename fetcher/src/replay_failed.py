@@ -21,13 +21,14 @@ import sys
 from urllib.parse import urlparse
 
 import config
+from logging_config import setup_logging
 from myredis import MyRedis
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-log = logging.getLogger("replay_failed")
 
 
 async def main(dry_run: bool, domain_filter: str | None) -> None:
+    flusher = setup_logging(-1)
+    log = logging.getLogger("replay_failed")
+
     redis = MyRedis()
     if not await redis.init_redis():
         log.critical("Cannot connect to Redis — aborting.")
@@ -78,6 +79,7 @@ async def main(dry_run: bool, domain_filter: str | None) -> None:
         skip_count,
     )
     await redis.close_redispool()
+    flusher.stop()
 
 
 if __name__ == "__main__":

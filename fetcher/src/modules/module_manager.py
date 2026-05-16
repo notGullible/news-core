@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import random
 from typing import TYPE_CHECKING, Any
@@ -31,10 +30,17 @@ log = logging.getLogger(__name__)
 # ── structured log helper ──────────────────────────────────────────────
 
 
-def _jlog(worker_id: int, event: str, **kwargs: Any) -> None:
-    """Emit a JSON-structured log line for machine parsing."""
-    payload = json.dumps({"ts": None, "worker": worker_id, "event": event, **kwargs}, default=str)
-    log.info(payload)
+def _jlog(event: str, **kwargs: Any) -> None:
+    """Emit a structured log line using the universal format.
+
+    Key-value pairs become space-separated ``key=value`` tokens.
+    If *kwargs* includes ``url`` it is pulled out and passed via
+    ``extra`` so the formatter places it in the ``[url]`` slot.
+    """
+    url = kwargs.pop("url", "-")
+    parts = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    msg = f"{event} {parts}".rstrip()
+    log.info(msg, extra={"url": url})
 
 
 # ── ModuleManager ──────────────────────────────────────────────────────
@@ -64,7 +70,7 @@ class ModuleManager:
         retries: int = int(task.get("retries", 0))
 
         if not url:
-            _jlog(self.worker_id, "task_skipped", reason="empty url")
+            _jlog("task_skipped", reason="empty url")
             return
 
         domain = urlparse(url).netloc.lower() or "unknown"
@@ -83,7 +89,7 @@ class ModuleManager:
         )
         soup = module.fetch(url, fetch_ctx)
         if soup is None:
-            _jlog(self.worker_id, "fetch_failed", url=url, retries=retries)
+            _jlog("fetch_failed", url=url, retries=retries)
             await self._handle_failure(task, "fetch returned empty")
             self._stats.failed += 1
             return
@@ -102,7 +108,7 @@ class ModuleManager:
             if article_data is not None:
                 await self._store_article(article_data)
                 self._stats.stored += 1
-                _jlog(self.worker_id, "article_stored", url=url,
+                _jlog("article_stored", url=url,
                       hash=article_data.content_hash[:12])
             
             # ── Always extract links (if depth allows) ─────────────
@@ -110,7 +116,7 @@ class ModuleManager:
                 links = module.extract_links(soup, url, seed)
                 self._stats.links_discovered += len(links)
                 new_count = await self._enqueue_links(links, depth + 1, seed, max_depth)
-                _jlog(self.worker_id, "links_summary",
+                _jlog("links_summary",
                     url=url, found=len(links), enqueued=new_count, depth=depth)
 
         
@@ -120,12 +126,12 @@ class ModuleManager:
                 total_count = 0
                 unique_count = 0
                 async for link in module.extract_listings_links(soup, url, seed):
-                    _jlog(self.worker_id, "listing_link_found",
+                    _jlog("listing_link_found",
                         url=url, link=link, depth=depth)
                     unique_count += await self._enqueue_links([link], depth + 1, seed, max_depth)
                     total_count += 1
                 self._stats.links_discovered += total_count
-                _jlog(self.worker_id, "listing_page",
+                _jlog("listing_page",
                     url=url, found=total_count, enqueued=unique_count, depth=depth)
         
         self._stats.processed += 1
@@ -229,7 +235,7 @@ class ModuleManager:
 
         if retries < config.DEFAULT_RETRY_COUNT:
             delay = config.DEFAULT_RETRY_DELAY * (2**retries)
-            _jlog(self.worker_id, "task_retry", url=url, retries=retries, delay=delay)
+            _jlog("task_retry", url=url, retries=retries, delay=delay)
             await asyncio.sleep(delay)
             await self.redis.enqueue_stream(
                 config.REDIS_STREAM,
@@ -242,7 +248,7 @@ class ModuleManager:
                 },
             )
         else:
-            _jlog(self.worker_id, "task_dead_letter", url=url, reason=reason)
+            _jlog("task_dead_letter", url=url, reason=reason)
             await self.redis.enqueue_stream(
                 config.REDIS_STREAM_FAILED,
                 {
@@ -277,8 +283,7 @@ class WorkerStats:
 
     def log(self, worker_id: int) -> None:
         log.info(
-            "[Worker %s] STATS: processed=%s, stored=%s, failed=%s, links_discovered=%s",
-            worker_id,
+            "STATS processed=%s stored=%s failed=%s links_discovered=%s",
             self.processed,
             self.stored,
             self.failed,

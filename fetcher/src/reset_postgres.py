@@ -22,14 +22,15 @@ import sys
 from sqlalchemy import delete, select, text
 
 import config
+from logging_config import setup_logging
 from models import Article, CrawlHistory
 from mypostgres import MyPostgres
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-log = logging.getLogger("reset_postgres")
-
 
 async def main(bad_only: bool) -> None:
+    flusher = setup_logging(-1)
+    log = logging.getLogger("reset_postgres")
+
     db = MyPostgres()
     if not await db.init_db():
         log.critical("Cannot connect to PostgreSQL — aborting.")
@@ -82,6 +83,7 @@ async def main(bad_only: bool) -> None:
             log.info("Truncated articles + crawl_history (both tables now empty).")
 
     await db.close_db()
+    flusher.stop()
 
 
 if __name__ == "__main__":

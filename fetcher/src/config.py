@@ -41,5 +41,15 @@ DEFAULT_RETRY_DELAY: int = int(os.getenv("DEFAULT_RETRY_DELAY", "5"))
 REQUEST_DELAY_MIN: float = float(os.getenv("REQUEST_DELAY_MIN", "2"))
 REQUEST_DELAY_MAX: float = float(os.getenv("REQUEST_DELAY_MAX", "5"))
 
+# ── Logging ────────────────────────────────────────────────────
+# Explicit LOG_LEVEL takes precedence; when unset, DEBUG=true → DEBUG else INFO.
+_raw_log_level = os.getenv("LOG_LEVEL", "").strip().upper()
+if _raw_log_level:
+    LOG_LEVEL: str = _raw_log_level
+else:
+    LOG_LEVEL: str = "DEBUG" if os.getenv("DEBUG", "false").strip().lower() == "true" else "INFO"
+LOG_DIR: str = os.getenv("LOG_DIR", "logs")
+LOG_FLUSH_INTERVAL: int = int(os.getenv("LOG_FLUSH_INTERVAL", "60"))
+
 # ── App ────────────────────────────────────────────────────────
 DEBUG: bool = os.getenv("DEBUG", "false").strip().lower() == "true"

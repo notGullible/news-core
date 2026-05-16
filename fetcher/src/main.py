@@ -5,25 +5,26 @@ import multiprocessing
 import signal
 
 # My Imports
-import config 
+import config
+from logging_config import setup_logging
 from workers import start_workers
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-log = logging.getLogger(__name__)
-
 async def main():
+    flusher = setup_logging(-1)  # main process (worker_id=-1)
+    log = logging.getLogger(__name__)
+
     log.info("NG Fetcher starting …")
     log.info("Redis : %s:%s  |  Stream : %s", config.REDIS_DB_HOST, config.REDIS_DB_PORT, config.REDIS_STREAM)
     log.info("PG   : %s:%s/%s", config.POSTGRES_HOST, config.POSTGRES_PORT, config.POSTGRES_DB)
-    log.info("Workers : %s  |  Debug : %s", config.NUMBER_OF_WORKERS, config.DEBUG)
+    log.info("Workers : %s  |  Debug : %s  |  Log level : %s", config.NUMBER_OF_WORKERS, config.DEBUG, config.LOG_LEVEL)
    
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()
     loop.add_signal_handler(signal.SIGINT, main_task.cancel) # type: ignore
     loop.add_signal_handler(signal.SIGTERM, main_task.cancel) # type: ignore
     
-    log.info(f"Listening to incoming requests on stream: {config.REDIS_STREAM}")
+    log.info("Listening to incoming requests on stream: %s", config.REDIS_STREAM)
     
     pool = ProcessPoolExecutor(
         max_workers=config.NUMBER_OF_WORKERS,
@@ -35,7 +36,7 @@ async def main():
         log.info("Shutting down...")
     finally:
         pool.shutdown(wait=True)
+        flusher.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
-    # main()
