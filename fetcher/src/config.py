@@ -35,7 +35,7 @@ POSTGRES_POOL_MAX: int = int(os.getenv("POSTGRES_POOL_MAX", "10"))
 NUMBER_OF_WORKERS: int = int(os.getenv("NUMBER_OF_WORKERS", "5"))
 
 # ── Crawl defaults ────────────────────────────────────────────
-DEFAULT_MAX_DEPTH: int = int(os.getenv("DEFAULT_MAX_DEPTH", "3"))
+DEFAULT_MAX_DEPTH: int = int(os.getenv("DEFAULT_MAX_DEPTH", "50"))
 DEFAULT_RETRY_COUNT: int = int(os.getenv("DEFAULT_RETRY_COUNT", "3"))
 DEFAULT_RETRY_DELAY: int = int(os.getenv("DEFAULT_RETRY_DELAY", "5"))
 REQUEST_DELAY_MIN: float = float(os.getenv("REQUEST_DELAY_MIN", "2"))

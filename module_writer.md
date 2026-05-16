@@ -323,24 +323,60 @@ def _extract_content(self, soup):
 
 #### Recipe C: Content uses numbered paragraph blocks (like Reuters 2026)
 
+Reuters wraps article text in an outer container with a nested
+content wrapper.  You must **descend into the content wrapper** —
+walking the outer container's direct children only finds structural
+chrome (images, toolbars), not the paragraphs themselves.
+
 ```python
 def _extract_content(self, soup):
-    container = soup.find("div", class_="article-body-module__container__...")
+    # 1 — outer container (class-prefix match for resilience).
+    container = None
+    for div in soup.find_all(
+        "div",
+        class_=lambda c: c and "article-body-module__container__" in c,
+    ):
+        container = div
+        break
     if not container:
         return None
 
+    # 2 — descend into the inner content wrapper.
+    content = None
+    for div in container.find_all(
+        "div",
+        class_=lambda c: c and "article-body-module__content__" in c,
+        recursive=False,
+    ):
+        content = div
+        break
+    if not content:
+        content = container  # fallback
+
+    # 3 — walk direct children of the content wrapper.
     parts = []
-    i = 0
-    while True:
-        para = container.find("div", attrs={"data-testid": f"paragraph-{i}"})
-        if para is None:
-            break
-        text = para.get_text(strip=True)
-        if text:
-            parts.append(text)
-        i += 1
+    for child in content.find_all(recursive=False):
+        tid = child.get("data-testid", "")
+
+        # Paragraph blocks (data-testid="paragraph-0", "paragraph-1", …)
+        if tid.startswith("paragraph-"):
+            # Use separator=" " so inline <a> tags don't swallow spaces.
+            text = child.get_text(separator=" ", strip=True)
+            if text:
+                parts.append(text)
+
+        # Headings embedded between paragraphs.
+        elif child.name in ("h2", "h3", "h4"):
+            text = child.get_text(separator=" ", strip=True)
+            if text:
+                parts.append(text)
+
     return "\n\n".join(parts) if parts else None
 ```
+
+**Key point:** `get_text(separator=" ", strip=True)` — the `separator=" "`
+is critical when paragraphs contain inline `<a>` tags.  Without it,
+`"President <a>Donald Trump</a> said"` becomes `"PresidentDonald Trumpsaid"`.
 
 #### Recipe D: Increase the minimum content threshold
 
@@ -395,11 +431,52 @@ def _extract_content(self, soup):
             el.decompose()
 
     paragraphs = [
-        p.get_text(strip=True)
+        p.get_text(separator=" ", strip=True)
         for p in container.find_all("p")
         if p.get_text(strip=True)
     ]
     return "\n\n".join(paragraphs) if paragraphs else None
+```
+
+#### Recipe I: Clean invisible Unicode characters
+
+Many sites insert zero-width spaces (``U+200B``), word joiners
+(``U+2060``), and other invisible formatting characters into text.
+Strip them after extraction so downstream consumers get clean text:
+
+```python
+_INVISIBLE_CHARS = "\u200b\u200c\u200d\u2060\ufeff"
+
+@staticmethod
+def _clean_text(text: str) -> str:
+    # Collapse runs of whitespace (including non-breaking spaces).
+    cleaned = " ".join(text.split())
+    # Remove zero-width spaces, word-joiners, BOM, etc.
+    for ch in _INVISIBLE_CHARS:
+        cleaned = cleaned.replace(ch, "")
+    return cleaned
+```
+
+Call it on every extracted text fragment:
+```python
+text = self._clean_text(child.get_text(separator=" ", strip=True))
+```
+
+#### Recipe J: Decompose hidden accessibility spans before extracting
+
+Some sites embed visually-hidden text inside links (e.g. ``", opens
+new tab"`` for screen readers).  Decompose these **before** calling
+``get_text()`` so they don't pollute your content:
+
+```python
+# Remove visually-hidden spans (clip:rect is the tell-tale style).
+for hidden in element.find_all(
+    "span",
+    style=lambda s: s and "clip:rect" in s,
+):
+    hidden.decompose()
+
+text = element.get_text(separator=" ", strip=True)
 ```
 
 ### 5b. Fetch Recipes
@@ -706,6 +783,37 @@ from modules.registry import get_module
 assert get_module("bbc.com") is not None
 ```
 
+### ⚠️  Test fixture must match what the pipeline processes
+
+If a site requires browser rendering (JS-heavy, like Reuters), your
+saved HTML fixture **must be saved after browser rendering**.  An
+HTTP-only snapshot is a JS shell with no article text — your module
+will pass tests against that shell but fail on real pages.
+
+Capture a fixture by either:
+* Saving the DOM from the browser after the page loads, or
+* Running the pipeline once, copying the rendered HTML from the
+  ``soup`` that ``fetch()`` returns.
+
+### 🔍 Debugging: tests pass but pipeline produces different output
+
+This almost always means the **module isn't being used at runtime**.
+The pipeline silently falls back to ``BaseModule`` when domain
+registration is missing (see Pitfall #2 below).
+
+Quick check — add a temporary print to ``module_manager.process()``:
+
+```python
+module_cls = get_module(domain) or BaseModule
+print(f"[{self.worker_id}] {domain!r} → {module_cls.__name__}")
+```
+
+If you see ``BaseModule`` for a domain you registered, check:
+1. Did you register **both** ``example.com`` and ``www.example.com``?
+2. Is your ``@register_module`` decorator actually firing?  (Add a
+   ``print`` inside the decorator body temporarily.)
+3. Did you add the import line in ``modules/__init__.py``?
+
 ### Test with multi-domain
 
 ```python
@@ -742,6 +850,11 @@ class ReutersModule(BaseModule):
 
     Does NOT override fetch() — the default HTTP-first + browser-fallback
     works correctly for Reuters (HTTP returns empty, browser renders JS).
+
+    Registers TWO domains (reuters.com AND www.reuters.com) because
+    ``urlparse(netloc)`` returns ``www.reuters.com`` for all article
+    URLs.  Without the www variant the pipeline silently falls back
+    to BaseModule — see Pitfall #2.
     """
 
     # ── headline ────────────────────────────────────────────────
@@ -754,9 +867,23 @@ class ReutersModule(BaseModule):
                     text = text[: -len(suffix)]
         return text
 
-    # ── content (Reuters 2026: numbered paragraph blocks) ───────
+    # ── content (Reuters 2026: numbered paragraphs + Summary) ───
+
+    # Zero-width / invisible characters Reuters inserts into text.
+    _INVISIBLE_CHARS = "\u200b\u200c\u200d\u2060\ufeff"
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """Normalise whitespace and strip invisible Unicode characters."""
+        cleaned = " ".join(text.split())
+        for ch in ReutersModule._INVISIBLE_CHARS:
+            cleaned = cleaned.replace(ch, "")
+        return cleaned
 
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
+        _txt = lambda el: el.get_text(separator=" ", strip=True)
+
+        # 1 — outer container (class-prefix match for resilience).
         container = None
         for div in soup.find_all(
             "div",
@@ -764,42 +891,89 @@ class ReutersModule(BaseModule):
         ):
             container = div
             break
-
         if not container:
             container = soup.find("div", attrs={"data-testid": "ArticleBody"})
-
         if not container:
             return None
 
-        parts: list[str] = []
-        skip_phrases = (
-            "advertisement", "sign up", "our standards",
-            "trust principles", "reporting by", "writing by",
-            "editing by", "thomson reuters",
-        )
+        # 2 — descend into the inner content wrapper.
+        content_div = None
+        for div in container.find_all(
+            "div",
+            class_=lambda c: c and "article-body-module__content__" in c,
+            recursive=False,
+        ):
+            content_div = div
+            break
+        if not content_div:
+            content_div = container  # fallback for older structure
 
-        direct_children = list(container.find_all(recursive=False))
-        if not direct_children:
-            i = 0
-            while True:
-                para = container.find("div", attrs={"data-testid": f"paragraph-{i}"})
-                if para is None:
-                    break
-                text = para.get_text(strip=True)
-                if text and not any(skip in text.lower() for skip in skip_phrases):
-                    parts.append(text)
-                i += 1
-        else:
-            for child in direct_children:
-                tid = child.get("data-testid", "")
-                if tid.startswith("paragraph-"):
-                    text = child.get_text(strip=True)
-                    if text and not any(skip in text.lower() for skip in skip_phrases):
-                        parts.append(text)
-                elif child.name == "h2":
-                    text = child.get_text(strip=True)
-                    if text:
-                        parts.append(text)
+        # 3 — walk children in document order.
+        parts: list[str] = []
+        for child in content_div.find_all(recursive=False):
+            tid = child.get("data-testid", "")
+
+            # Summary widget (bullet points).
+            if tid == "ContextWidget":
+                tab = child.find("li", attrs={"data-testid": "summary-tab"})
+                if tab:
+                    parts.append(self._clean_text(_txt(tab)))
+                ul = child.find("ul", attrs={"data-testid": "Summary"})
+                if ul:
+                    for li in ul.find_all("li", recursive=False):
+                        t = self._clean_text(_txt(li))
+                        if t:
+                            parts.append(t)
+                continue
+
+            # Numbered paragraph blocks.
+            if tid.startswith("paragraph-"):
+                t = self._clean_text(_txt(child))
+                if t:
+                    parts.append(t)
+                continue
+
+            # Sign-off line ("Reporting by …").
+            if tid == "SignOff":
+                t = self._clean_text(_txt(child))
+                if t:
+                    parts.append(t)
+                continue
+            signoff = child.find(attrs={"data-testid": "SignOff"})
+            if signoff:
+                t = self._clean_text(_txt(signoff))
+                if t:
+                    parts.append(t)
+
+            # Trust badge ("Our Standards: …").
+            if child.name == "p":
+                # Decompose visually-hidden spans first.
+                for hidden in child.find_all(
+                    "span", style=lambda s: s and "clip:rect" in s
+                ):
+                    hidden.decompose()
+                t = self._clean_text(_txt(child))
+                if t and "Our Standards" in t:
+                    for sfx in (", opens new tab", ", opens new tab."):
+                        if t.endswith(sfx):
+                            t = t[: -len(sfx)].rstrip()
+                    parts.append(t)
+                    continue
+
+            # Headings.
+            if child.name in ("h2", "h3", "h4"):
+                t = self._clean_text(_txt(child))
+                if t:
+                    parts.append(t)
+                continue
+
+            # Explicit skips (promo-box, empty element divs, nav, toolbar).
+            if tid in ("promo-box",):
+                continue
+            if tid == "element" and not child.get_text(strip=True):
+                continue
+            if child.name == "nav" or tid == "ArticleBodyRow":
+                continue
 
         return "\n\n".join(parts) if parts else None
 
@@ -811,7 +985,6 @@ class ReutersModule(BaseModule):
             name = meta.get("name", "")
             if prop == "article:section" or name in ("article:section", "section"):
                 return meta.get("content")
-
         for sel in ("a[data-testid='Section']", ".article__section"):
             el = soup.select_one(sel)
             if el:
@@ -824,7 +997,6 @@ class ReutersModule(BaseModule):
         result = super()._extract_author(soup)
         if result:
             return result
-
         for sel in ("a[data-testid='Byline']", ".article__byline"):
             el = soup.select_one(sel)
             if el:
@@ -833,6 +1005,18 @@ class ReutersModule(BaseModule):
                     text = text[3:]
                 return text
         return None
+
+
+@register_module(domain="www.reuters.com")
+class ReutersWWWModule(ReutersModule):
+    """Same extraction, registered for the www subdomain.
+
+    ``urlparse('https://www.reuters.com/…').netloc`` returns
+    ``'www.reuters.com'``, not ``'reuters.com'``.  Without this
+    second registration the pipeline silently falls back to
+    BaseModule — see Pitfall #2.
+    """
+    pass
 ```
 
 ### What ReutersModule does NOT override
@@ -842,6 +1026,30 @@ class ReutersModule(BaseModule):
 - `is_listing_page()` — link-count heuristic works
 - `extract_links()` — standard `<a href>` extraction works
 - `_extract_date()` — meta-tag approach works
+
+### Design decisions worth highlighting
+
+* **Two registrations:** Always check ``urlparse(url).netloc`` for
+  the actual domain your site uses.  Reuters articles live at
+  ``www.reuters.com``.
+* **Descend into content wrapper:** The outer
+  ``article-body-module__container__*`` div holds structural chrome
+  (images, toolbars).  Real content is one level deeper in
+  ``article-body-module__content__*``.  Walking the wrong level
+  silently produces empty content.
+* **``get_text(separator=" ", strip=True)``:** Paragraphs contain
+  inline ``<a>`` tags ("President ``<a>``Donald Trump``</a>`` said").
+  Without ``separator=" "`` the space around the link disappears.
+* **``_clean_text``:** Strips invisible characters (zero-width
+  spaces, word joiners) that Reuters inserts.  Call it on every
+  extracted fragment.
+* **Decompose hidden spans:** The trust badge's ``<a>`` contains a
+  ``<span style="clip:rect(0 0 0 0)">, opens new tab</span>`` for
+  screen readers.  Decompose it before ``get_text()``.
+* **Include, don't skip:** The old module filtered out "Reporting
+  by…" and "Our Standards…" as boilerplate.  We now include
+  everything that is part of the article — the downstream consumer
+  decides what to display.
 
 **Lesson:** Only override what's broken. Start with an empty subclass.
 
@@ -858,7 +1066,7 @@ class BBCModule(BaseModule):   # ← no @register_module decorator!
 
 **Symptom:** BBC URLs fall through to `BaseModule`. No errors — just silently works less well.
 
-### ❌ Pitfall 2: Wrong domain string
+### ❌ Pitfall 2: Wrong domain string — silent fallback to BaseModule
 
 `urlparse("https://www.bbc.com/news").netloc` → `"www.bbc.com"`. Register BOTH:
 
@@ -870,6 +1078,17 @@ class BBCModule(BaseModule):
 @register_module(domain="bbc.com")
 class BBCBareModule(BBCModule):
     pass
+```
+
+**This is the #1 cause of "tests pass but pipeline produces garbage."**
+The module_manager catches the mismatch with ``get_module(domain) or
+BaseModule`` — no error, no warning, just silently worse extraction.
+
+Debugging tip — add to ``module_manager.process()`` temporarily:
+
+```python
+module_cls = get_module(domain) or BaseModule
+print(f"[{self.worker_id}] domain={domain!r} → {module_cls.__name__}")
 ```
 
 ### ❌ Pitfall 3: Returning empty string instead of None
@@ -901,9 +1120,23 @@ def _extract_headline(self, soup):
     ...
 ```
 
-### ❌ Pitfall 6: Forgetting to strip text
+### ❌ Pitfall 6: Forgetting to strip text / losing word boundaries
 
 Always use `.get_text(strip=True)` or `.strip()`.
+
+**When text contains inline `<a>` tags**, use ``separator=" "``:
+
+```python
+# BAD — "President<a>Donald Trump</a>said" → "PresidentDonald Trumpsaid"
+text = para.get_text(strip=True)
+
+# GOOD — space is inserted where the <a> tag was
+text = para.get_text(separator=" ", strip=True)
+```
+
+Without ``separator=" "``, BeautifulSoup concatenates adjacent text
+nodes with no separator, so words on either side of an inline tag
+merge together.
 
 ### ❌ Pitfall 7: Not importing in `modules/__init__.py`
 
