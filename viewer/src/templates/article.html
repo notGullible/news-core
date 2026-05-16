@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ article.headline or "Article" }} — NG Viewer{% endblock %}
+
+{% block content %}
+
+<!-- Back link -->
+<a href="/articles" class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 transition mb-6 group">
+  <svg class="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+  Back to articles
+</a>
+
+<!-- Article card -->
+<article class="bg-surface-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+  <!-- Header -->
+  <header class="px-6 sm:px-8 pt-6 sm:pt-8 pb-4 border-b border-gray-800">
+    <h1 class="text-xl sm:text-2xl font-bold leading-snug text-gray-100 mb-4">
+      {{ article.headline or "(no headline)" }}
+    </h1>
+    <div class="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
+      <span class="px-2.5 py-1 rounded-full bg-surface-800 text-gray-300 font-medium border border-gray-700/50">
+        {{ article.source_domain }}
+      </span>
+      <span class="text-gray-600">|</span>
+      <time class="text-gray-500" datetime="{{ article.scraped_at.isoformat() if article.scraped_at else '' }}">
+        Scraped {{ article.scraped_at.strftime('%B %d, %Y at %H:%M UTC') if article.scraped_at else 'unknown' }}
+      </time>
+      {% if article.first_seen_at and article.updated_at and article.first_seen_at != article.updated_at %}
+      <span class="text-gray-600">|</span>
+      <span class="text-amber-600/80">Updated {{ article.updated_at.strftime('%b %d, %H:%M') if article.updated_at else '' }}</span>
+      {% endif %}
+      <span class="text-gray-600">|</span>
+      <span class="text-gray-600 font-mono text-[10px]">{{ article.content_hash[:16] }}</span>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <section class="px-6 sm:px-8 py-6 sm:py-8">
+    {% if article.content %}
+    <div class="prose prose-invert prose-sm sm:prose-base max-w-none
+                prose-headings:text-gray-100 prose-p:text-gray-300 prose-p:leading-relaxed
+                prose-strong:text-gray-200 prose-li:text-gray-300">
+      {% for para in article.content.split('\n\n') %}
+      <p class="mb-4 last:mb-0">{{ para }}</p>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-600 italic">No content extracted for this article.</p>
+    {% endif %}
+  </section>
+
+  <!-- Footer metadata -->
+  <footer class="px-6 sm:px-8 py-4 border-t border-gray-800 bg-surface-950/50 flex flex-wrap items-center gap-4 text-xs text-gray-600">
+    <a href="{{ article.url }}" target="_blank" rel="noopener"
+       class="inline-flex items-center gap-1 text-emerald-500 hover:text-emerald-400 transition">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      View original
+    </a>
+    <span>First seen: {{ article.first_seen_at.strftime('%b %d, %Y') if article.first_seen_at else '' }}</span>
+  </footer>
+
+</article>
+
+{% endblock %}

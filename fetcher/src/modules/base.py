@@ -4,7 +4,14 @@ Base classes and helpers for site-module authors.
 Every scraper module inherits from :class:`BaseModule` and overrides
 site-specific extraction logic.  The base class provides sensible defaults
 that work for most news sites (meta-tag extraction, h1/headline, article
-body via common CSS classes).
+body via common CSS classes, link extraction, and page fetching).
+
+A module's contract with the pipeline:
+
+1. :meth:`fetch`      — how to get the page (HTTP, browser, API, …)
+2. :meth:`extract`    — is this an article?  return structured data
+3. :meth:`extract_links`  — what links should we crawl next?
+4. :meth:`is_listing_page` — is this a category/hub page?
 """
 
 from __future__ import annotations
@@ -16,6 +23,22 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
+
+
+# ── FetchContext ───────────────────────────────────────────────────────
+
+
+@dataclass
+class FetchContext:
+    """Metadata the pipeline passes to :meth:`BaseModule.fetch` so the
+    module can make context-aware fetch decisions (e.g. skip the
+    sparse-links heuristic when already at max depth).
+    """
+
+    seed_prefix: str   # root URL prefix defining crawl scope
+    depth: int         # current crawl depth (0 = seed)
+    max_depth: int     # configured maximum depth
+    worker_id: int     # for log correlation
 
 
 # ── ArticleData ────────────────────────────────────────────────────────
@@ -43,14 +66,28 @@ class BaseModule:
     """Default extraction logic suitable for most news / content sites.
 
     Subclass, set ``domain``, and optionally override any ``_extract_*``
-    helper or :meth:`extract_links`.
+    helper, :meth:`extract_links`, or :meth:`fetch`.
     """
 
     # ── per-module identity ──────────────────────────────────────
 
     domain: str = ""  # e.g. "reuters.com" — set in subclass or by registry
 
-    # ── Minimum character count for article content.  Pages with very
+    # ── fetch tunables ──────────────────────────────────────────
+
+    # Per-class browser-required cache.  Once a fetch attempt for a
+    # domain falls through to the browser, subsequent URLs for the same
+    # domain skip HTTP (within the same worker process).
+    _browser_required: set[str] = set()
+
+    # Minimum number of in-scope links a page must have before we
+    # trust an HTTP result.  Below this threshold we re-fetch via
+    # browser (likely a JS shell that didn't render links).
+    MIN_LISTING_LINKS: int = 3
+
+    # ── article-detection tunables ──────────────────────────────
+
+    # Minimum character count for article content.  Pages with very
     # short content (e.g. listing/category pages that happen to have an
     # <h1> and a one-line description) are treated as non-articles.
     MIN_CONTENT_LENGTH: int = 120
@@ -60,7 +97,85 @@ class BaseModule:
     # to many other in-scope pages).
     MAX_ARTICLE_LINKS: int = 4
 
-    # ── public API ────────────────────────────────────────────────
+    # ── public API: fetch ────────────────────────────────────────
+
+    def fetch(self, url: str, context: FetchContext) -> BeautifulSoup | None:
+        """Fetch the page contents for *url*.
+
+        The default implementation uses **HTTP-first with browser
+        fallback**, caching the browser-required verdict per domain
+        (class-level, so it persists across invocations within the
+        same worker process).
+
+        Override this method when a site needs:
+
+        * Always-browser (skip the HTTP attempt)
+        * Custom headers, cookies, or proxy
+        * An API endpoint instead of HTML scraping
+        * Multi-stage fetch (e.g. POST-then-GET)
+        * Cached / offline responses
+
+        Composable helpers provided so overrides can reuse pieces:
+
+        * :meth:`_try_http_fetch`   — lightweight HTTP GET
+        * :meth:`_try_browser_fetch`— headless Chrome render
+        * :meth:`_has_meaningful_content` — quick soup sanity check
+        * :meth:`_count_in_scope_links`   — count qualifying links
+        """
+        domain = urlparse(url).netloc.lower()
+
+        # 1 — Try HTTP if we haven't cached this domain as browser-only.
+        if domain not in self._browser_required:
+            soup = self._try_http_fetch(url)
+            if soup is not None and self._has_meaningful_content(soup):
+                # Got content — but at non-terminal depths we need enough
+                # links to confirm this isn't a JS shell.
+                if context.depth >= context.max_depth:
+                    return soup
+                link_count = self._count_in_scope_links(
+                    soup, url, context.seed_prefix
+                )
+                if link_count >= self.MIN_LISTING_LINKS:
+                    return soup
+
+        # 2 — Browser fallback (and cache the verdict).
+        self._browser_required.add(domain)
+        return self._try_browser_fetch(url, context.worker_id)
+
+    # ── composable fetch helpers (use in overridden `fetch`) ─────
+
+    def _try_http_fetch(self, url: str) -> BeautifulSoup | None:
+        """Lightweight HTTP GET via botasaurus ``@request``.
+
+        Override or call directly from a custom :meth:`fetch`.
+        """
+        from modules.services import http_fetch  # noqa: PLC0415
+        return http_fetch(url)
+
+    def _try_browser_fetch(self, url: str, worker_id: int) -> BeautifulSoup | None:
+        """Headless Chrome render via botasaurus ``@browser``.
+
+        Override or call directly from a custom :meth:`fetch`.
+        """
+        from modules.services import browser_fetch  # noqa: PLC0415
+        return browser_fetch(url, worker_id)
+
+    @staticmethod
+    def _has_meaningful_content(soup) -> bool:
+        """Quick heuristic: does *soup* contain at least one ``<p>`` or ``<h1>``?"""
+        return bool(soup.find("p") or soup.find("h1"))
+
+    def _count_in_scope_links(
+        self, soup, url: str, seed_prefix: str
+    ) -> int:
+        """Return the number of in-scope links on the page.
+
+        Uses :meth:`extract_links` internally — site-specific overrides
+        are automatically respected.
+        """
+        return len(self.extract_links(soup, url, seed_prefix))
+
+    # ── public API: extraction ───────────────────────────────────
 
     def extract(
         self,
@@ -146,7 +261,12 @@ class BaseModule:
         return None
 
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
-        """Try common article containers, collect ``<p>`` text."""
+        """Try common article containers, collect ``<p>`` text.
+
+        Falls back to ``<body>`` only as a last resort — and even then
+        strips non-article sections (footer, nav, aside, author bios,
+        boilerplate) to avoid extracting page chrome as content.
+        """
         container = (
             soup.find("div", attrs={"data-testid": "ArticleBody"})
             or soup.find("div", class_="article-body")
@@ -154,8 +274,35 @@ class BaseModule:
             or soup.find("div", class_="article-content")
             or soup.find("article")
             or soup.find("main")
-            or soup.find("body")
         )
+
+        # Last resort: <body>, but clone it and strip junk first.
+        if not container:
+            container = soup.find("body")
+            if container:
+                from copy import copy
+                container = copy(container)
+                # Remove structural non-article elements.
+                for junk in container.find_all(["footer", "nav", "aside", "header"]):
+                    junk.decompose()
+                # Remove elements that match known boilerplate / bio patterns.
+                for junk_sel in (
+                    "[class*='author']", "[class*='Author']",
+                    "[class*='byline']", "[class*='Byline']",
+                    "[class*='bio']", "[class*='Bio']",
+                    "[class*='footer']", "[class*='Footer']",
+                    "[class*='trust']", "[class*='Trust']",
+                    "[class*='standard']", "[class*='Standard']",
+                    "[class*='disclaimer']", "[class*='Disclaimer']",
+                    "[data-testid='Byline']",
+                    "[data-testid='Attribution']",
+                    "[data-testid='SiteFooter']",
+                    "[data-testid='ProductCards']",
+                    "[data-testid='SocialIcon']",
+                ):
+                    for el in container.select(junk_sel):
+                        el.decompose()
+
         if not container:
             return None
 

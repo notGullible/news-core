@@ -19,12 +19,10 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
-from modules.base import ArticleData, BaseModule
+from modules.base import ArticleData, BaseModule, FetchContext
 from modules.registry import get_module
-from modules.services import browser_fetch, http_fetch
 
 if TYPE_CHECKING:
-    from bs4 import BeautifulSoup
     from mypostgres import MyPostgres
     from myredis import MyRedis
 
@@ -52,8 +50,6 @@ class ModuleManager:
         self.worker_id = worker_id
         self.redis = myredis
         self.db = mypostgres
-        # In-memory cache: domains that we've confirmed require a browser.
-        self._browser_required_cache: set[str] = set()
         # Stats (see periodic summary)
         self._stats = WorkerStats()
 
@@ -79,7 +75,13 @@ class ModuleManager:
         module.domain = domain  # ensure domain is set for fallbacks
 
         # ── Fetch the page ────────────────────────────────────
-        soup = await self._fetch_page(url, domain, module, depth, max_depth, seed)
+        fetch_ctx = FetchContext(
+            seed_prefix=seed,
+            depth=depth,
+            max_depth=max_depth,
+            worker_id=self.worker_id,
+        )
+        soup = module.fetch(url, fetch_ctx)
         if soup is None:
             _jlog(self.worker_id, "fetch_failed", url=url, retries=retries)
             await self._handle_failure(task, "fetch returned empty")
@@ -115,49 +117,6 @@ class ModuleManager:
 
         self._stats.processed += 1
         await self._maybe_log_stats()
-
-    # ── fetch (HTTP-first with browser cache + link-aware fallback) ─
-
-    # Minimum number of in-scope links expected on a non-article (listing)
-    # page.  If an HTTP fetch yields fewer, we re-fetch via browser.
-    MIN_LISTING_LINKS = 3
-
-    async def _fetch_page(
-        self, url: str, domain: str, module: BaseModule,
-        depth: int, max_depth: int, seed: str,
-    ) -> BeautifulSoup | None:
-        """HTTP-first; fall back to headless browser if needed.
-
-        The fallback triggers when:
-        * HTTP fetch returns ``None``; or
-        * HTTP soup has no meaningful content; or
-        * HTTP soup has content but suspiciously few in-scope links
-          (likely a JS-rendered listing page).
-        """
-        # 1 — Try HTTP if we haven't cached this domain as browser-only.
-        if domain not in self._browser_required_cache:
-            soup = http_fetch(url)
-            if soup is not None and self._has_meaningful_content(soup):
-                # Got content — but does it have enough links if we're
-                # supposed to be discovering more pages?
-                if depth < max_depth:
-                    links = module.extract_links(soup, url, seed)
-                    if len(links) >= self.MIN_LISTING_LINKS:
-                        return soup
-                    # Sparse links → probably a JS shell; fall through to browser.
-                    _jlog(self.worker_id, "sparse_links_http", url=url,
-                          link_count=len(links))
-                else:
-                    return soup  # at max depth, we don't care about links
-
-        # 2 — Browser fallback.
-        self._browser_required_cache.add(domain)
-        return browser_fetch(url, self.worker_id)
-
-    @staticmethod
-    def _has_meaningful_content(soup) -> bool:
-        """Quick heuristic: does the page contain at least one <p> or <h1>?"""
-        return bool(soup.find("p") or soup.find("h1"))
 
     # ── PostgreSQL persistence ────────────────────────────────────
 

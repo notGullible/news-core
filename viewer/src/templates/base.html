@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-gray-950 text-gray-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NG Viewer{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface:  { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1',
+                        400: '#94a3b8', 500: '#64748b', 600: '#475569', 700: '#334155',
+                        800: '#1e293b', 850: '#172033', 900: '#0f172a', 950: '#020617' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+    /* Prose overrides for dark mode */
+    .prose-invert a { color: #60a5fa; }
+    .prose-invert blockquote { border-left-color: #334155; }
+
+    /* Skeleton pulse */
+    @keyframes shimmer { 0% { opacity: .25 } 50% { opacity: .45 } 100% { opacity: .25 } }
+    .skeleton { animation: shimmer 2s ease-in-out infinite; }
+
+    /* Content line clamp */
+    .line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .line-clamp-3 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Navbar -->
+  <nav class="border-b border-gray-800 bg-surface-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <a href="/articles" class="flex items-center gap-3 text-lg font-semibold tracking-tight">
+        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-surface-950 font-bold text-sm">NG</span>
+        <span class="hidden sm:inline">News Gatherer</span>
+      </a>
+      <div class="flex items-center gap-4 text-sm text-gray-400">
+        {% if stats %}
+        <span>{{ stats.total }} articles</span>
+        <span class="w-1 h-1 rounded-full bg-gray-600"></span>
+        <span>{{ stats.domains }} domains</span>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-gray-800 py-4 text-center text-xs text-gray-600">
+    NG Viewer &middot; powered by FastAPI + Tailwind
+  </footer>
+
+</body>
+</html>

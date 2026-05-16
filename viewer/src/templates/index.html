@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Articles — NG Viewer{% endblock %}
+
+{% block content %}
+
+<!-- Search bar -->
+<form method="get" action="/articles" class="mb-6 flex flex-wrap gap-3">
+  <div class="flex-1 min-w-[200px] relative">
+    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+    <input type="text" name="search" value="{{ search }}" placeholder="Search headlines &amp; content…"
+           class="w-full pl-10 pr-4 py-2.5 bg-surface-800 border border-gray-700 rounded-lg text-sm
+                  focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500
+                  placeholder-gray-500 transition">
+  </div>
+  <select name="domain"
+          class="px-4 py-2.5 bg-surface-800 border border-gray-700 rounded-lg text-sm
+                 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500
+                 text-gray-300 cursor-pointer transition">
+    <option value="">All domains</option>
+    {% for d, cnt in domains %}
+    <option value="{{ d }}" {% if domain == d %}selected{% endif %}>{{ d }} ({{ cnt }})</option>
+    {% endfor %}
+  </select>
+  <button type="submit"
+          class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium
+                 rounded-lg transition active:scale-95">
+    Filter
+  </button>
+  {% if search or domain %}
+  <a href="/articles"
+     class="px-4 py-2.5 border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-gray-200
+            text-sm rounded-lg transition flex items-center gap-1">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    Clear
+  </a>
+  {% endif %}
+</form>
+
+<!-- Stats pill -->
+<div class="mb-4 text-xs text-gray-500">
+  {% if search %}Searching for <strong class="text-gray-300">"{{ search }}"</strong> — {% endif %}
+  {{ total }} article{% if total != 1 %}s{% endif %} found
+</div>
+
+<!-- Article cards -->
+{% if articles %}
+<div class="grid gap-3">
+  {% for a in articles %}
+  <a href="/articles/{{ a.id }}"
+     class="group block p-4 bg-surface-900 border border-gray-800 hover:border-gray-700
+            rounded-xl transition hover:bg-surface-850">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0 flex-1">
+        <h2 class="text-sm font-semibold text-gray-100 group-hover:text-emerald-400 transition line-clamp-2 mb-1">
+          {{ a.headline or "(no headline)" }}
+        </h2>
+        <p class="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+          {{ (a.content or "")[:250] }}{% if a.content and a.content|length > 250 %}&hellip;{% endif %}
+        </p>
+      </div>
+      <div class="shrink-0 flex flex-col items-end gap-1.5 text-[11px]">
+        <span class="px-2 py-0.5 rounded-full bg-surface-800 text-gray-400 font-medium border border-gray-700/50">
+          {{ a.source_domain }}
+        </span>
+        <span class="text-gray-600">{{ a.scraped_at.strftime('%b %d, %Y') if a.scraped_at else '' }}</span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<nav class="mt-8 flex items-center justify-center gap-1.5">
+  {% set args = [] %}
+  {% if search %}{% set _ = args.append("search=" + search) %}{% endif %}
+  {% if domain %}{% set _ = args.append("domain=" + domain) %}{% endif %}
+  {% set qs = "?" + args|join("&") if args else "?" %}
+
+  <a href="/articles{{ qs }}page={{ page - 1 }}"
+     class="px-3 py-2 text-sm rounded-lg border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition {{ 'opacity-40 pointer-events-none' if page <= 1 }}">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+  </a>
+
+  {% for p in range(1, total_pages + 1) %}
+    {% if p == page %}
+    <span class="px-3.5 py-2 text-sm rounded-lg bg-emerald-600 text-white font-medium">{{ p }}</span>
+    {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+    <a href="/articles{{ qs }}page={{ p }}"
+       class="px-3.5 py-2 text-sm rounded-lg border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition">{{ p }}</a>
+    {% elif p == page - 3 or p == page + 3 %}
+    <span class="px-1 text-gray-700">&hellip;</span>
+    {% endif %}
+  {% endfor %}
+
+  <a href="/articles{{ qs }}page={{ page + 1 }}"
+     class="px-3 py-2 text-sm rounded-lg border border-gray-800 hover:border-gray-600 text-gray-400 hover:text-gray-200 transition {{ 'opacity-40 pointer-events-none' if page >= total_pages }}">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+  </a>
+</nav>
+{% endif %}
+
+{% else %}
+<!-- Empty state -->
+<div class="flex flex-col items-center justify-center py-20 text-center">
+  <svg class="w-16 h-16 text-gray-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/></svg>
+  <h3 class="text-lg font-medium text-gray-400 mb-1">No articles yet</h3>
+  <p class="text-sm text-gray-600 max-w-sm">
+    {% if search or domain %}
+      No results match your filters. Try a different search or clear the filters.
+    {% else %}
+      Start the <code class="text-gray-500 bg-surface-800 px-1 rounded">fetcher</code> pipeline to populate articles here.
+    {% endif %}
+  </p>
+  {% if search or domain %}
+  <a href="/articles" class="mt-4 text-sm text-emerald-500 hover:text-emerald-400 transition">Clear all filters →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

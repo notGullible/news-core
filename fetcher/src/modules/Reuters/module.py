@@ -29,32 +29,83 @@ class ReutersModule(BaseModule):
                     text = text[: -len(suffix)]
         return text
 
-    # ── content (Reuters-specific: paragraphs are <div>, not <p>) ─
+    # ── content (Reuters-specific: paragraphs via data-testid) ─
 
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
-        """Extract article body from Reuters' ``<div>``-based paragraphs.
+        """Extract article body from Reuters' paragraph-based DOM.
 
-        Reuters uses ``<div class="article-body-module__paragraph__*">``
-        for article text and ``<h2>`` for section headings.  Boilerplate
-        (newsletter, ads, reporting credits, trust badge) is in ``<p>``
-        or ``<div class="article-body-module__element__*">`` elements
-        which we explicitly skip.
+        Reuters (2026) wraps article text in::
+
+            <div class="article-body-module__container__* over-*-para">
+              <div data-testid="paragraph-0">…</div>
+              <div data-testid="paragraph-1">…</div>
+              …
+            </div>
+
+        We locate the container via a loose class-prefix match, then
+        collect every ``data-testid^="paragraph-"`` element inside it.
+        Boilerplate blocks (newsletter sign-up, reporting credits,
+        trust principles, advertisement) are skipped.
         """
-        container = soup.find("div", attrs={"data-testid": "ArticleBody"})
+        # 1 — find the article-body container via class prefix match.
+        container = None
+        for div in soup.find_all(
+            "div",
+            class_=lambda c: c and "article-body-module__container__" in c,
+        ):
+            container = div
+            break
+
+        if not container:
+            # Fallback: try older Reuters structure.
+            container = soup.find("div", attrs={"data-testid": "ArticleBody"})
+
         if not container:
             return None
 
+        # 2 — collect paragraph-N blocks AND h2 headings in DOM order.
         parts: list[str] = []
-        for el in container.select(
-            "div[class*='article-body-module__paragraph__'], "
-            "h2[class*='article-body-module__heading__']"
-        ):
-            text = el.get_text(strip=True)
-            if text and not any(
-                skip in text.lower()
-                for skip in ("advertisement", "sign up", "our standards", "trust principles")
-            ):
-                parts.append(text)
+        skip_phrases = (
+            "advertisement",
+            "scroll to continue",
+            "sign up",
+            "our standards",
+            "trust principles",
+            "reporting by",
+            "additional reporting",
+            "writing by",
+            "editing by",
+            "thomson reuters",
+        )
+
+        # Walk immediate children of the container in document order.
+        direct_children = list(container.find_all(recursive=False))
+        if not direct_children:
+            # Container might have a wrapper; try numbered paragraph-N fallback.
+            i = 0
+            while True:
+                para = container.find("div", attrs={"data-testid": f"paragraph-{i}"})
+                if para is None:
+                    break
+                text = para.get_text(strip=True)
+                if text and not any(skip in text.lower() for skip in skip_phrases):
+                    parts.append(text)
+                i += 1
+        else:
+            for child in direct_children:
+                tid = child.get("data-testid", "")
+                if tid.startswith("paragraph-"):
+                    text = child.get_text(strip=True)
+                    if text and not any(skip in text.lower() for skip in skip_phrases):
+                        parts.append(text)
+                elif child.name == "h2":
+                    text = child.get_text(strip=True)
+                    if text:
+                        parts.append(text)
+                elif child.name in ("h3", "h4"):
+                    text = child.get_text(strip=True)
+                    if text:
+                        parts.append(text)
 
         return "\n\n".join(parts) if parts else None
 
