@@ -31,23 +31,45 @@ class ReutersModule(BaseModule):
 
     # ── content (Reuters-specific: paragraphs via data-testid) ─
 
+    # Zero-width / invisible characters that Reuters inserts into text.
+    _INVISIBLE_CHARS = "\u200b\u200c\u200d\u2060\ufeff"
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """Normalise whitespace and strip invisible Unicode characters."""
+        # Collapse runs of whitespace (including &nbsp; → space).
+        cleaned = " ".join(text.split())
+        # Remove zero-width spaces, word-joiners, BOM, etc.
+        for ch in ReutersModule._INVISIBLE_CHARS:
+            cleaned = cleaned.replace(ch, "")
+        return cleaned
+
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
         """Extract article body from Reuters' paragraph-based DOM.
 
         Reuters (2026) wraps article text in::
 
             <div class="article-body-module__container__* over-*-para">
-              <div data-testid="paragraph-0">…</div>
-              <div data-testid="paragraph-1">…</div>
-              …
+              <div class="article-body-module__content__*">
+                <div data-testid="ContextWidget">  <!-- Summary bullets -->
+                <div data-testid="paragraph-0">…</div>
+                <div data-testid="paragraph-1">…</div>
+                …
+                <p data-testid="SignOff">Reporting by …</p>
+                <p>Our Standards: …</p>
+              </div>
             </div>
 
-        We locate the container via a loose class-prefix match, then
-        collect every ``data-testid^="paragraph-"`` element inside it.
-        Boilerplate blocks (newsletter sign-up, reporting credits,
-        trust principles, advertisement) are skipped.
+        We locate the outer container via a loose class-prefix match,
+        descend into the inner content wrapper, then walk its children
+        in document order collecting: Summary bullets, paragraph-N
+        blocks, sign-off line, and the trust-principles badge.
+        Boilerplate (promo-box, empty element divs, tags nav, toolbar)
+        is skipped.
         """
-        # 1 — find the article-body container via class prefix match.
+        _txt = lambda el: el.get_text(separator=" ", strip=True)  # noqa: E731
+
+        # 1 — find the outer article-body container.
         container = None
         for div in soup.find_all(
             "div",
@@ -57,55 +79,98 @@ class ReutersModule(BaseModule):
             break
 
         if not container:
-            # Fallback: try older Reuters structure.
             container = soup.find("div", attrs={"data-testid": "ArticleBody"})
 
         if not container:
             return None
 
-        # 2 — collect paragraph-N blocks AND h2 headings in DOM order.
-        parts: list[str] = []
-        skip_phrases = (
-            "advertisement",
-            "scroll to continue",
-            "sign up",
-            "our standards",
-            "trust principles",
-            "reporting by",
-            "additional reporting",
-            "writing by",
-            "editing by",
-            "thomson reuters",
-        )
+        # 2 — find the inner content wrapper.
+        content_div = None
+        for div in container.find_all(
+            "div",
+            class_=lambda c: c and "article-body-module__content__" in c,
+            recursive=False,
+        ):
+            content_div = div
+            break
 
-        # Walk immediate children of the container in document order.
-        direct_children = list(container.find_all(recursive=False))
-        if not direct_children:
-            # Container might have a wrapper; try numbered paragraph-N fallback.
-            i = 0
-            while True:
-                para = container.find("div", attrs={"data-testid": f"paragraph-{i}"})
-                if para is None:
-                    break
-                text = para.get_text(strip=True)
-                if text and not any(skip in text.lower() for skip in skip_phrases):
+        if not content_div:
+            # Fallback: use the container itself (older structure).
+            content_div = container
+
+        # 3 — walk children in document order, extracting relevant parts.
+        parts: list[str] = []
+
+        for child in content_div.find_all(recursive=False):
+            tid = child.get("data-testid", "")
+
+            # ── Summary widget ──────────────────────────────
+            if tid == "ContextWidget":
+                summary_tab = child.find("li", attrs={"data-testid": "summary-tab"})
+                if summary_tab:
+                    parts.append(self._clean_text(_txt(summary_tab)))
+                summary_list = child.find("ul", attrs={"data-testid": "Summary"})
+                if summary_list:
+                    for li in summary_list.find_all("li", recursive=False):
+                        text = self._clean_text(_txt(li))
+                        if text:
+                            parts.append(text)
+                continue
+
+            # ── Paragraph blocks ────────────────────────────
+            if tid.startswith("paragraph-"):
+                text = self._clean_text(_txt(child))
+                if text:
                     parts.append(text)
-                i += 1
-        else:
-            for child in direct_children:
-                tid = child.get("data-testid", "")
-                if tid.startswith("paragraph-"):
-                    text = child.get_text(strip=True)
-                    if text and not any(skip in text.lower() for skip in skip_phrases):
-                        parts.append(text)
-                elif child.name == "h2":
-                    text = child.get_text(strip=True)
-                    if text:
-                        parts.append(text)
-                elif child.name in ("h3", "h4"):
-                    text = child.get_text(strip=True)
-                    if text:
-                        parts.append(text)
+                continue
+
+            # ── Sign-off ("Reporting by …") ─────────────────
+            if tid == "SignOff":
+                text = self._clean_text(_txt(child))
+                if text:
+                    parts.append(text)
+                continue
+            # SignOff may be nested one level deeper.
+            signoff = child.find(attrs={"data-testid": "SignOff"})
+            if signoff:
+                text = self._clean_text(_txt(signoff))
+                if text:
+                    parts.append(text)
+                # Keep processing: this child may also contain other items.
+
+            # ── Trust badge ("Our Standards: …") ────────────
+            if child.name == "p":
+                # Remove visually-hidden accessibilty text first.
+                for hidden in child.find_all(
+                    "span",
+                    style=lambda s: s and "clip:rect" in s,
+                ):
+                    hidden.decompose()
+                text = self._clean_text(_txt(child))
+                if text and ("Our Standards" in text or "Trust Principles" in text):
+                    # Strip trailing artefacts from SVG / "opens new tab".
+                    for suffix in (", opens new tab", ", opens new tab."):
+                        if text.endswith(suffix):
+                            text = text[: -len(suffix)].rstrip()
+                    parts.append(text)
+                    continue
+
+            # ── Headings (section breaks) ───────────────────
+            if child.name in ("h2", "h3", "h4"):
+                text = self._clean_text(_txt(child))
+                if text:
+                    parts.append(text)
+                continue
+
+            # ── Explicit skips ──────────────────────────────
+            if tid == "promo-box":
+                continue
+            if tid == "element" and not child.get_text(strip=True):
+                continue
+            if child.name == "nav":
+                continue
+            if tid == "ArticleBodyRow":
+                continue
 
         return "\n\n".join(parts) if parts else None
 
@@ -154,3 +219,9 @@ class ReutersModule(BaseModule):
                 return text
 
         return None
+
+
+@register_module(domain="www.reuters.com")
+class ReutersWWWModule(ReutersModule):
+    """Same extraction, registered for the www subdomain."""
+    pass

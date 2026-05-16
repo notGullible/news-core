@@ -1,4 +1,4 @@
-.PHONY: up down reset reset-redis reset-pg seed scrape
+.PHONY: up down reset reset-redis reset-pg seed scrape test
 
 # ── Infrastructure ──────────────────────────────────────────
 
@@ -39,3 +39,8 @@ scrape:
 # ── Full run ────────────────────────────────────────────────
 
 all: up seed scrape
+
+
+# Tests
+test:
+	cd fetcher && uv run python test_reuters_module.py
