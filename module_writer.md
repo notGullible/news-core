@@ -80,9 +80,14 @@ ModuleManager.process(task)
     │       └─ Returns None → page is not an article, skip storage
     │
     ├── 6. IF depth < max_depth:
-    │       Calls module.extract_links(soup, url, seed)
-    │       └─ Returns list[str] of in-scope URLs
-    │          ModuleManager deduplicates (Redis Set + Postgres) and re-enqueues
+    │       IF is_listing:
+    │         Calls module.extract_listings_links(soup, url, seed)
+    │         └─ Async generator — yields one link at a time.
+    │            ModuleManager deduplicates and enqueues each link immediately.
+    │       ELSE:
+    │         Calls module.extract_links(soup, url, seed)
+    │         └─ Returns list[str] of in-scope URLs
+    │            ModuleManager deduplicates (Redis Set + Postgres) and re-enqueues
     │
     └── 7. Logs stats, sleeps a politeness delay, loops
 ```
@@ -395,6 +400,15 @@ class HighLinkArticles(BaseModule):
     MAX_ARTICLE_LINKS = 15   # default is 4.  Up to 14 in-scope links is still an article
 ```
 
+**⚠️ Important:** Many news sites embed "related articles" sidebars
+on article pages that contain 4–15 in-scope links.  If your articles
+are being silently skipped (``article_stored`` events never fire for
+them), check the logs — if you see ``listing_link_found`` for article
+URLs, ``MAX_ARTICLE_LINKS`` is too low.  Raise it above the maximum
+sidebar link count but below the listing-page link count (typically
+50+).  For Reuters we use ``30`` (articles have ≤15 sidebar links,
+listings have 50+).
+
 #### Recipe F: Extract links from non-`<a>` tags
 
 ```python
@@ -567,6 +581,43 @@ class SessionModule(BaseModule):
             return None
 ```
 
+#### Recipe O: Browser with interactive clicks ("Load more" buttons)
+
+When a listing page requires clicking a "Load more" button to
+expand content, use ``services.browser_click_and_load`` wrapped in
+``asyncio.to_thread()`` from an async ``extract_listings_links``::
+
+```python
+from modules.services import browser_click_and_load
+
+class MyModule(BaseModule):
+    async def extract_listings_links(self, soup, url, seed):
+        LOAD_MORE = 'button[data-testid="load-more"]'
+
+        def _click() -> list[str]:
+            soup = browser_click_and_load(
+                url=url, btn=LOAD_MORE, elem=LOAD_MORE, max_clicks=5
+            )
+            return self.extract_links(soup, url, seed)
+
+        links = await asyncio.to_thread(_click)
+        for link in links:
+            yield link
+```
+
+**How it works:** The inner ``_click`` function is a closure that
+captures *url* and *seed* from the outer scope.  It's called via
+``asyncio.to_thread`` so the blocking browser session doesn't stall
+the async event loop.  ``browser_click_and_load`` opens Chrome,
+navigates to *url*, clicks *btn* up to *max_clicks* times (stopping
+early if *elem* leaves the DOM), then returns the fully-expanded
+``BeautifulSoup``.
+
+**Why not plain HTTP?**  Many "load more" buttons trigger
+CAPTCHA-protected API calls (DataDome, PerimeterX).  Only a real
+browser session has the cookies and JavaScript context to pass those
+challenges.
+
 ---
 
 ## 6. The ArticleData Return Value
@@ -693,7 +744,18 @@ These are `BaseModule` methods you can call from an overridden `fetch()`:
 
 ### Relationship to `services.py`
 
-`services.py` is the low-level transport. Site modules should **not** import it directly — use the `_try_*` helper methods on `BaseModule` instead. Those helpers internally import from `services.py` with deferred imports to avoid circular dependencies.
+`services.py` is the low-level transport. Site modules should **not**
+import it directly — use the ``_try_*`` helper methods on
+``BaseModule`` instead. Those helpers internally import from
+``services.py`` with deferred imports to avoid circular dependencies.
+
+**Exception:** ``browser_click_and_load(url, btn, elem, max_clicks)``
+is designed for direct import by site modules.  It opens a headless
+Chrome session, navigates to *url*, clicks *btn* repeatedly (up to
+*max_clicks* or until *elem* disappears), and returns the expanded
+``BeautifulSoup``.  Use it inside :meth:`extract_listings_links` via
+``asyncio.to_thread()`` when a listing page has a "Load more" or
+infinite-scroll pattern that requires browser interaction.
 
 ---
 
@@ -1023,9 +1085,21 @@ class ReutersWWWModule(ReutersModule):
 
 - `fetch()` — default HTTP-first + browser-fallback works
 - `extract()` — default logic (check `MIN_CONTENT_LENGTH`) is fine
-- `is_listing_page()` — link-count heuristic works
 - `extract_links()` — standard `<a href>` extraction works
 - `_extract_date()` — meta-tag approach works
+
+### What ReutersModule DOES override (new)
+
+- ``MAX_ARTICLE_LINKS`` — raised to 30 (from default 4) because
+  Reuters article pages carry 4–15 sidebar links that otherwise
+  trigger false listing detection.
+- ``is_listing_page()`` — path-equality check against
+  ``const.LISTING_URL_PREFIXES``, with link-count fallback for
+  unknown sections.
+- ``extract_listings_links()`` — async generator that uses
+  ``services.browser_click_and_load`` via ``asyncio.to_thread()``
+  to click the "Load more articles" button on listing pages,
+  then extracts links from the expanded DOM.
 
 ### Design decisions worth highlighting
 
@@ -1157,6 +1231,53 @@ def fetch(self, url):            # ← BAD: missing context parameter!
 ```python
 def fetch(self, url, context):   # ← correct signature
     return self._try_browser_fetch(url, context.worker_id)
+```
+
+### ❌ Pitfall 10: ``MAX_ARTICLE_LINKS`` too low — articles silently classified as listings
+
+The default ``MAX_ARTICLE_LINKS = 4`` works for sites where articles
+have few in-scope links.  But many news sites embed "related
+articles" / "more from this section" sidebars with **4–15 in-scope
+links** on every article page.  When the link-count fallback fires
+(because the URL doesn't match a known listing prefix), every article
+with ≥4 sidebar links is treated as a **listing page** — extraction
+is skipped, no article is stored, and the pipeline silently wastes
+its depth budget crawling sidebar links as if they were listings.
+
+**Symptom:** Logs show ``listing_link_found`` events for URLs that
+clearly look like articles (date-stamped slugs).  The ``article_stored``
+event never fires for them.
+
+**Fix:** Raise ``MAX_ARTICLE_LINKS`` on your module class.  Choose a
+value between the maximum sidebar-link count on article pages and
+the link count on genuine listing pages::
+
+    # Reuters: articles ≤ 15 sidebar links, listings ≥ 50.
+    MAX_ARTICLE_LINKS: int = 30
+
+### ❌ Pitfall 11: Prefix matching catches article URLs in ``is_listing_page``
+
+When overriding ``is_listing_page`` to check known listing URL
+patterns, **use path-equality, not ``str.startswith``**.  A prefix
+match on ``/world/middle-east/`` also matches article URLs like
+``/world/middle-east/trump-says-isis-2026-05-16/``, falsely
+classifying them as listings.
+
+```python
+# BAD — prefix matches articles too!
+def is_listing_page(self, soup, url, seed):
+    for prefix in LISTING_URL_PREFIXES:
+        if url.startswith(prefix):
+            return True
+    ...
+
+# GOOD — path-equality (query-string agnostic).
+def is_listing_page(self, soup, url, seed):
+    path = urlparse(url).path.rstrip("/") + "/"
+    for prefix in LISTING_URL_PREFIXES:
+        if path == urlparse(prefix).path.rstrip("/") + "/":
+            return True
+    ...
 ```
 
 ---
