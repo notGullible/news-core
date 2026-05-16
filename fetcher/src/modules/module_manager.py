@@ -109,7 +109,9 @@ class ModuleManager:
         if depth < max_depth:
             links = module.extract_links(soup, url, seed)
             self._stats.links_discovered += len(links)
-            await self._enqueue_links(links, depth + 1, seed, max_depth)
+            new_count = await self._enqueue_links(links, depth + 1, seed, max_depth)
+            _jlog(self.worker_id, "links_summary",
+                  url=url, found=len(links), enqueued=new_count, depth=depth)
 
         self._stats.processed += 1
         await self._maybe_log_stats()
@@ -205,8 +207,11 @@ class ModuleManager:
         depth: int,
         seed: str,
         max_depth: int,
-    ) -> None:
-        """Dedup links (Redis Set + Postgres), then push new ones to the stream."""
+    ) -> int:
+        """Dedup links (Redis Set + Postgres), then push new ones to the stream.
+
+        Returns the number of newly enqueued links.
+        """
         new_links = 0
         for link in links:
             # 1 — Redis Set dedup (fast path).
@@ -232,8 +237,7 @@ class ModuleManager:
             )
             new_links += 1
 
-        if new_links:
-            _jlog(self.worker_id, "links_enqueued", count=new_links, depth=depth)
+        return new_links
 
     async def _url_in_postgres(self, url: str) -> bool:
         """Check whether *url* exists in the ``articles`` table."""

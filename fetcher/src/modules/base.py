@@ -98,7 +98,8 @@ class BaseModule:
     def extract_links(self, soup: BeautifulSoup, url: str, seed_prefix: str) -> list[str]:
         """Return all in-scope ``<a href>`` URLs whose href starts with
         *seed_prefix*.  Deduplicated within the page.  Filters out
-        fragment-only URLs (``#…``) and the current page itself.
+        fragment-only URLs (``#…``), self-references, JavaScript
+        placeholders (``undefined``), and other malformed URLs.
         """
         seen: set[str] = set()
         links: list[str] = []
@@ -112,6 +113,10 @@ class BaseModule:
             parsed = urlparse(absolute)
             clean = parsed._replace(fragment="").geturl().rstrip("/")
             if not clean or clean == stripped_url:
+                continue
+
+            # Skip JavaScript artifacts and malformed URLs.
+            if "/undefined" in clean or "javascript:" in clean.lower():
                 continue
 
             # Keep only URLs under the seed prefix.
@@ -143,10 +148,11 @@ class BaseModule:
     def _extract_content(self, soup: BeautifulSoup) -> str | None:
         """Try common article containers, collect ``<p>`` text."""
         container = (
-            soup.find("article")
-            or soup.find(class_="article-body")
-            or soup.find(class_="article__body")
-            or soup.find(class_="article-content")
+            soup.find("div", attrs={"data-testid": "ArticleBody"})
+            or soup.find("div", class_="article-body")
+            or soup.find("div", class_="article__body")
+            or soup.find("div", class_="article-content")
+            or soup.find("article")
             or soup.find("main")
             or soup.find("body")
         )

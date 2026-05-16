@@ -29,6 +29,35 @@ class ReutersModule(BaseModule):
                     text = text[: -len(suffix)]
         return text
 
+    # ── content (Reuters-specific: paragraphs are <div>, not <p>) ─
+
+    def _extract_content(self, soup: BeautifulSoup) -> str | None:
+        """Extract article body from Reuters' ``<div>``-based paragraphs.
+
+        Reuters uses ``<div class="article-body-module__paragraph__*">``
+        for article text and ``<h2>`` for section headings.  Boilerplate
+        (newsletter, ads, reporting credits, trust badge) is in ``<p>``
+        or ``<div class="article-body-module__element__*">`` elements
+        which we explicitly skip.
+        """
+        container = soup.find("div", attrs={"data-testid": "ArticleBody"})
+        if not container:
+            return None
+
+        parts: list[str] = []
+        for el in container.select(
+            "div[class*='article-body-module__paragraph__'], "
+            "h2[class*='article-body-module__heading__']"
+        ):
+            text = el.get_text(strip=True)
+            if text and not any(
+                skip in text.lower()
+                for skip in ("advertisement", "sign up", "our standards", "trust principles")
+            ):
+                parts.append(text)
+
+        return "\n\n".join(parts) if parts else None
+
     # ── section ─────────────────────────────────────────────────
 
     def _extract_section(self, soup: BeautifulSoup) -> str | None:

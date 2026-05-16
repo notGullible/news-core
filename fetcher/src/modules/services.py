@@ -25,6 +25,16 @@ botasaurus.decorators_common.first_run = True
 
 log = logging.getLogger(__name__)
 
+# ── Stealth Chrome arguments ──────────────────────────────────────────
+# These flags reduce the detectability of headless Chrome by hiding
+# automation indicators (``navigator.webdriver``, ``cdc_`` variables,
+# AutomationControlled blink feature).
+
+STEALTH_ARGUMENTS: list[str] = [
+    # Hides navigator.webdriver = true (primary bot detection signal).
+    "--disable-blink-features=AutomationControlled",
+]
+
 
 # ── HTTP (lightweight) ────────────────────────────────────────────────
 
@@ -53,15 +63,20 @@ def http_fetch(url: str) -> BeautifulSoup | None:
 def browser_fetch(url: str, worker_id: int) -> BeautifulSoup | None:
     """Fetch *url* via a headless Chrome browser and return the parsed HTML.
 
+    Applies anti-detection measures: disables AutomationControlled blink
+    feature (hides ``navigator.webdriver``).  Does **not** override the
+    user-agent — botasaurus already patches the default UA to remove
+    "Headless" markers.
+
     Returns ``None`` on failure.  The browser is automatically closed after
     the call completes.
     """
     try:
-
         @browser(  # type: ignore[misc]
             output=None,
             headless=True,
-            wait_for_complete_page_load=False,  # some pages never signal "complete"
+            wait_for_complete_page_load=False,
+            add_arguments=STEALTH_ARGUMENTS,
         )
         def _scrap(driver: Driver, _data):  # type: ignore[no-untyped-def]
             log.info("  [Worker %s] Browser navigating to %s", worker_id, url)
