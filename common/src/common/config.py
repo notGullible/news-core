@@ -67,8 +67,7 @@ QDRANT_DEFAULT_COLLECTION: str = os.getenv("QDRANT_DEFAULT_COLLECTION", "article
 
 # ── Embeddings ──────────────────────────────────────────────
 EMBEDDING_MODEL_NAME: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
-EMBEDDING_DEFAULT_VECTOR_SIZE: int = 384     # e.g., all-MiniLM-L6-v2 embedding dim                                                                                                                            
-EMBEDDING_DEFAULT_DISTANCE = qmodels.Distance.COSINE     
+EMBEDDING_DEFAULT_DISTANCE = qmodels.Distance.COSINE 
 
 # ── Viewer ─────────────────────────────────────────────────────
 PAGE_SIZE: int = int(os.getenv("PAGE_SIZE", "25"))

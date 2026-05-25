@@ -35,6 +35,50 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_CHUNK_OVERLAP: int = 50   # tokens of overlap between consecutive chunks
 
+# ── Embedding-dimension lookup ───────────────────────────────────────
+# Known dimensions for popular sentence-transformers models.
+# This lets :func:`get_embedding_dim` answer instantly without loading
+# the full model.  When :class:`MyEmbeddings` loads a model, the cache
+# is updated with the actual dimension.
+
+_MODEL_DIMS: dict[str, int] = {
+    "all-MiniLM-L6-v2": 384,
+    "all-MiniLM-L12-v2": 384,
+    "all-mpnet-base-v2": 768,
+    "multi-qa-MiniLM-L6-cos-v1": 384,
+    "multi-qa-mpnet-base-dot-v1": 768,
+    "all-distilroberta-v1": 768,
+    "paraphrase-MiniLM-L6-v2": 384,
+    "paraphrase-multilingual-MiniLM-L12-v2": 384,
+    "clip-ViT-B-32": 512,
+}
+
+
+def get_embedding_dim(model_name: str | None = None) -> int:
+    """Return the embedding dimension for *model_name*.
+
+    Looks up a built-in table of known sentence-transformers models
+    first (instant, no I/O).  For unknown models returns 384 — a safe
+    default for most BERT-derived sentence encoders — and logs a
+    warning.  Pass ``vector_size`` explicitly to
+    :meth:`MyQdrant.ensure_collection` if you need a different value.
+
+    When :meth:`MyEmbeddings.init_db` successfully loads a model the
+    cache is updated with the real dimension, so subsequent calls
+    always return the exact value.
+    """
+    name = model_name or EMBEDDING_MODEL_NAME
+    if name in _MODEL_DIMS:
+        return _MODEL_DIMS[name]
+
+    log.warning(
+        "Unknown embedding dimension for model '%s' — "
+        "returning default 384.  Pass vector_size explicitly "
+        "to MyQdrant.ensure_collection() to override.",
+        name,
+    )
+    return 384
+
 
 class MyEmbeddings:
     """Thin wrapper around a ``SentenceTransformer`` model.
@@ -72,10 +116,12 @@ class MyEmbeddings:
 
             log.info("Loading embedding model '%s' …", self._model_name)
             self._model = SentenceTransformer(self._model_name)
+            dim = self._model.get_sentence_embedding_dimension()
+            _MODEL_DIMS[self._model_name] = dim  # update shared cache
             log.info(
                 "Model loaded — max_seq_length=%s, dim=%s",
                 self._model.max_seq_length,
-                self._model.get_sentence_embedding_dimension(),
+                dim,
             )
             return True
 

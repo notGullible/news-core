@@ -34,10 +34,10 @@ from common.config import (
     QDRANT_API_KEY,
     QDRANT_USE_TLS,
     QDRANT_DEFAULT_COLLECTION,
+    EMBEDDING_DEFAULT_DISTANCE
     DEBUG,
-    EMBEDDING_DEFAULT_VECTOR_SIZE,
-    EMBEDDING_DEFAULT_DISTANCE,
 )
+from common.myembeddings import get_embedding_dim
 
 if TYPE_CHECKING:
     from qdrant_client.http.models import (
@@ -51,11 +51,11 @@ log = logging.getLogger(__name__)
 
 
 # ── Default collection parameters ────────────────────────────────────
-# These are used when auto-creating the default collection in DEBUG mode.
-# Override per-collection in production by calling :meth:`ensure_collection`
-# with explicit *vector_size* and *distance* before upserting.
+# The vector size is resolved lazily via :func:`get_embedding_dim` so
+# that the embedding model (which may not be loaded yet) determines the
+# correct dimension.  The distance metric is fixed to Cosine — the
+# standard for normalised sentence embeddings.
 
-_DEFAULT_VECTOR_SIZE = EMBEDDING_DEFAULT_VECTOR_SIZE
 _DEFAULT_DISTANCE = EMBEDDING_DEFAULT_DISTANCE
 
 
@@ -105,7 +105,7 @@ class MyQdrant:
             if DEBUG:
                 await self.ensure_collection(
                     collection_name=QDRANT_DEFAULT_COLLECTION,
-                    vector_size=_DEFAULT_VECTOR_SIZE,
+                    vector_size=get_embedding_dim(),
                     distance=_DEFAULT_DISTANCE,
                 )
                 log.info(
@@ -132,7 +132,7 @@ class MyQdrant:
     async def ensure_collection(
         self,
         collection_name: str,
-        vector_size: int = _DEFAULT_VECTOR_SIZE,
+        vector_size: int | None = None,
         distance: qmodels.Distance = _DEFAULT_DISTANCE,
     ) -> None:
         """Create *collection_name* if it does not already exist.
@@ -145,6 +145,9 @@ class MyQdrant:
             vector_size: Dimensionality of vectors to be stored.
             distance: Distance metric (Cosine, Dot, Euclidean).
         """
+        if vector_size is None:
+            vector_size = get_embedding_dim()
+
         try:
             await self._client.get_collection(collection_name)
             # Collection exists — nothing to do.
