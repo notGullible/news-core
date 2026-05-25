@@ -14,6 +14,7 @@ Import this module and reference module-level constants::
 
 import os
 from dotenv import load_dotenv, find_dotenv
+from qdrant_client.http import models as qmodels
 
 # find_dotenv walks up from CWD — .env can live at the repo root.
 load_dotenv(find_dotenv())
@@ -56,6 +57,18 @@ else:
     LOG_LEVEL: str = "DEBUG" if os.getenv("DEBUG", "false").strip().lower() == "true" else "INFO"
 LOG_DIR: str = os.getenv("LOG_DIR", "logs")
 LOG_FLUSH_INTERVAL: int = int(os.getenv("LOG_FLUSH_INTERVAL", "60"))
+
+# ── Qdrant (Vector DB) ──────────────────────────────────────
+QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_API_KEY: str | None = os.getenv("QDRANT_API_KEY") or None
+QDRANT_USE_TLS: bool = os.getenv("QDRANT_USE_TLS", "false").strip().lower() == "true"
+QDRANT_DEFAULT_COLLECTION: str = os.getenv("QDRANT_DEFAULT_COLLECTION", "articles")
+
+# ── Embeddings ──────────────────────────────────────────────
+EMBEDDING_MODEL_NAME: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+EMBEDDING_DEFAULT_VECTOR_SIZE: int = 384     # e.g., all-MiniLM-L6-v2 embedding dim                                                                                                                            
+EMBEDDING_DEFAULT_DISTANCE = qmodels.Distance.COSINE     
 
 # ── Viewer ─────────────────────────────────────────────────────
 PAGE_SIZE: int = int(os.getenv("PAGE_SIZE", "25"))
