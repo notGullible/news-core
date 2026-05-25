@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models for the fetcher service.
+SQLAlchemy ORM models for the NG pipeline.
 
 Tables
 ------
@@ -51,11 +51,6 @@ class Article(Base):
         onupdate=func.now(),
     )
 
-    __table_args__ = (
-        # url uniqueness is handled by Column(unique=True) above.
-        # source_domain index is handled by Column(index=True) above.
-    )
-
 
 class CrawlHistory(Base):
     __tablename__ = "crawl_history"
@@ -76,6 +71,5 @@ class CrawlHistory(Base):
     )
 
     __table_args__ = (
-        # url index is handled by Column(index=True) above.
         Index("ix_crawl_history_scraped_at", "scraped_at"),
     )

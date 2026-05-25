@@ -20,13 +20,13 @@ import logging
 import sys
 from urllib.parse import urlparse
 
-import config
-from logging_config import setup_logging
-from myredis import MyRedis
+from common import config
+from common.logging_config import setup_logging
+from common.myredis import MyRedis
 
 
 async def main(dry_run: bool, domain_filter: str | None) -> None:
-    flusher = setup_logging(-1)
+    flusher = setup_logging(-1, component="Fetcher")
     log = logging.getLogger("replay_failed")
 
     redis = MyRedis()

@@ -1,9 +1,9 @@
 """
-Universal logging configuration for the fetcher service.
+Universal logging configuration for the NG pipeline services.
 
 Configures the root logger with a custom formatter that produces:
 
-    timestamp |   [Fetcher][id] | [url] message
+    timestamp |   [Component][id] | [url] message
 
 Two handlers are installed per process:
 - StreamHandler → stdout (terminal / docker logs)
@@ -15,10 +15,10 @@ flush and join the thread.
 
 Usage::
 
-    from logging_config import setup_logging
+    from common.logging_config import setup_logging
     import logging
 
-    flusher = setup_logging(worker_id=3)
+    flusher = setup_logging(worker_id=3, component="Fetcher")
     log = logging.getLogger(__name__)
     log.info("Task started", extra={"url": "https://..."})
     ...
@@ -33,14 +33,15 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-import config
+from common.config import LOG_LEVEL, LOG_DIR, LOG_FLUSH_INTERVAL
 
 # ── Format strings ─────────────────────────────────────────────────
 LOG_FMT = "%(asctime)s |   %(prefix)s%(message)s"
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
-# ── Per-process worker-id (set by setup_logging) ───────────────────
+# ── Per-process state (set by setup_logging) ──────────────────────
 _current_worker_id: int = -1
+_current_component: str = "Pipeline"
 _configured: bool = False  # guards against re-configuration within the same process
 
 
@@ -53,11 +54,14 @@ def set_worker_id(worker_id: int) -> None:
 # ── Custom formatter ───────────────────────────────────────────────
 
 
-class GrouperFormatter(logging.Formatter):
-    """Injects ``[Fetcher][id] | [url]`` before every message.
+class PipelineFormatter(logging.Formatter):
+    """Injects ``[Component][id] | [url]`` before every message.
 
     ``worker_id`` is read from ``record.worker_id`` (set via ``extra=``)
     and falls back to the process-global ``_current_worker_id``.
+
+    ``component`` is read from ``record.component`` (set via ``extra=``)
+    and falls back to ``_current_component``.
 
     ``url`` is read from ``record.url`` (set via ``extra=``) and
     falls back to ``"-"`` when absent.
@@ -67,8 +71,11 @@ class GrouperFormatter(logging.Formatter):
         worker_id = getattr(record, "worker_id", None)
         if worker_id is None:
             worker_id = _current_worker_id
+        component = getattr(record, "component", None)
+        if component is None:
+            component = _current_component
         url = getattr(record, "url", "-")
-        record.prefix = f"[Grouper][{worker_id}] | [{url}] "  # type: ignore[attr-defined]
+        record.prefix = f"[{component}][{worker_id}] | [{url}] "  # type: ignore[attr-defined]
         return super().format(record)
 
 
@@ -121,20 +128,25 @@ class _NoopFlusher(_PeriodicFlusher):
 # ── Public API ─────────────────────────────────────────────────────
 
 
-def setup_logging(worker_id: int) -> _PeriodicFlusher:
+def setup_logging(
+    worker_id: int,
+    component: str = "Pipeline",
+) -> _PeriodicFlusher:
     """Configure universal logging for the current OS process.
 
     Creates ``logs/{timestamp}/``, installs the formatter + handlers
     on the root logger, starts the periodic flusher.
 
     *worker_id* is 0..N for workers; use -1 for the main process.
+    *component* is the service name shown in log prefixes (e.g. "Fetcher", "Grouper").
 
-    Idempotent: subsequent calls only update the worker-id and return
-    a no-op flusher (the first caller owns the real one).
+    Idempotent: subsequent calls only update the worker-id / component
+    and return a no-op flusher (the first caller owns the real one).
     """
-    global _configured
+    global _configured, _current_component, _current_worker_id
 
-    set_worker_id(worker_id)
+    _current_worker_id = worker_id
+    _current_component = component
 
     if _configured:
         # Already set up — return a no-op flusher.
@@ -143,14 +155,14 @@ def setup_logging(worker_id: int) -> _PeriodicFlusher:
 
     # Timestamped log directory (one per run).
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = Path.cwd() / config.LOG_DIR / ts
+    log_dir = Path.cwd() / LOG_DIR / ts
     os.makedirs(log_dir, exist_ok=True)
 
     log_file = "main.log" if worker_id < 0 else f"worker-{worker_id}.log"
     file_path = log_dir / log_file
 
-    level = getattr(logging, config.LOG_LEVEL, logging.INFO)
-    formatter = GrouperFormatter(fmt=LOG_FMT, datefmt=DATE_FMT)
+    level = getattr(logging, LOG_LEVEL, logging.INFO)
+    formatter = PipelineFormatter(fmt=LOG_FMT, datefmt=DATE_FMT)
 
     # Stream handler → stdout.
     stream = logging.StreamHandler()
@@ -169,6 +181,6 @@ def setup_logging(worker_id: int) -> _PeriodicFlusher:
     root.addHandler(stream)
     root.addHandler(file_handler)
 
-    flusher = _PeriodicFlusher(file_handler, interval=config.LOG_FLUSH_INTERVAL)
+    flusher = _PeriodicFlusher(file_handler, interval=LOG_FLUSH_INTERVAL)
 
     return flusher

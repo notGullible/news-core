@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import config
+from common import config
 from database import get_session
 from main import render
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/articles", tags=["articles"])
 
 async def _get_stats(session: AsyncSession) -> dict:
     """Return total article count and distinct domain count."""
-    from models import Article  # noqa: PLC0415
+    from common.models import Article  # noqa: PLC0415
     total = (await session.execute(select(func.count(Article.id)))).scalar() or 0
     domains = (
         await session.execute(
@@ -42,7 +42,7 @@ async def list_articles(
     page_size = config.PAGE_SIZE
     offset = (page - 1) * page_size
 
-    from models import Article  # noqa: PLC0415
+    from common.models import Article  # noqa: PLC0415
 
     # Base query
     base = select(Article)
@@ -111,7 +111,7 @@ async def article_detail(
     article_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
 ):
-    from models import Article  # noqa: PLC0415
+    from common.models import Article  # noqa: PLC0415
 
     result = await session.execute(
         select(Article).where(Article.id == article_id)

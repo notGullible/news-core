@@ -21,14 +21,14 @@ import sys
 
 from sqlalchemy import delete, select, text
 
-import config
-from logging_config import setup_logging
-from models import Article, CrawlHistory
-from mypostgres import MyPostgres
+from common import config
+from common.logging_config import setup_logging
+from common.models import Article, CrawlHistory
+from common.mypostgres import MyPostgres
 
 
 async def main(bad_only: bool) -> None:
-    flusher = setup_logging(-1)
+    flusher = setup_logging(-1, component="Fetcher")
     log = logging.getLogger("reset_postgres")
 
     db = MyPostgres()

@@ -1,4 +1,4 @@
-.PHONY: up down reset reset-redis reset-pg seed scrape test
+.PHONY: up down reset reset-redis reset-pg seed scrape test grouper viewer
 
 # ── Infrastructure ──────────────────────────────────────────
 
@@ -45,6 +45,10 @@ all: up seed scrape
 test:
 	cd fetcher && uv run python test_reuters_module.py
 
+
+# Grouper
+grouper:
+	cd grouper && uv run python src/main.py
 
 # Viewer
 viewer:

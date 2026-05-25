@@ -5,13 +5,13 @@ import multiprocessing
 import signal
 
 # My Imports
-import config
-from logging_config import setup_logging
+from common import config
+from common.logging_config import setup_logging
 from workers import start_workers
 
 
 async def main():
-    flusher = setup_logging(-1)  # main process (worker_id=-1)
+    flusher = setup_logging(-1, component="Fetcher")  # main process (worker_id=-1)
     log = logging.getLogger(__name__)
 
     log.info("NG Fetcher starting …")

@@ -16,13 +16,13 @@ import asyncio
 import logging
 import sys
 
-import config
-from logging_config import setup_logging
-from myredis import MyRedis
+from common import config
+from common.logging_config import setup_logging
+from common.myredis import MyRedis
 
 
 async def main() -> None:
-    flusher = setup_logging(-1)
+    flusher = setup_logging(-1, component="Fetcher")
     log = logging.getLogger("reset_redis")
 
     redis = MyRedis()

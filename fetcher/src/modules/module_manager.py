@@ -17,13 +17,13 @@ from urllib.parse import urlparse
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-import config
+from common import config
 from modules.base import ArticleData, BaseModule, FetchContext
 from modules.registry import get_module
 
 if TYPE_CHECKING:
-    from mypostgres import MyPostgres
-    from myredis import MyRedis
+    from common.mypostgres import MyPostgres
+    from common.myredis import MyRedis
 
 log = logging.getLogger(__name__)
 
@@ -293,4 +293,4 @@ class WorkerStats:
 
 
 # Late import to avoid circular dependency at module level.
-import models  # noqa: E402
+from common import models  # noqa: E402

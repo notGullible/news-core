@@ -4,14 +4,14 @@
 
 import asyncio
 import logging
-from myredis import MyRedis
+from common.myredis import MyRedis
 import sites 
-import config
-from logging_config import setup_logging
+from common import config
+from common.logging_config import setup_logging
 
 
 async def main():
-    flusher = setup_logging(-1)  # loader runs as "main"
+    flusher = setup_logging(-1, component="Fetcher")  # loader runs as "main"
     log = logging.getLogger(__name__)
     
     log.info("Running Loader ... ")

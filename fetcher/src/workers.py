@@ -19,11 +19,11 @@ import signal
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Union
 
-import config
-from logging_config import setup_logging
+from common import config
+from common.logging_config import setup_logging
 from modules.module_manager import ModuleManager
-from mypostgres import MyPostgres
-from myredis import MyRedis
+from common.mypostgres import MyPostgres
+from common.myredis import MyRedis
 
 
 # ── public entry point ─────────────────────────────────────────────────
@@ -54,7 +54,7 @@ async def _worker(worker_id: int) -> None:
     """Infinite loop: connect → dequeue → process → repeat."""
 
     # ── Logging setup (per-process) ───────────────────────────
-    flusher = setup_logging(worker_id)
+    flusher = setup_logging(worker_id, component="Fetcher")
     log = logging.getLogger(__name__)
 
     # ── Setup ─────────────────────────────────────────────────

@@ -29,16 +29,25 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy import text
 
-import config
+from common.config import (
+    POSTGRES_HOST,
+    POSTGRES_PORT,
+    POSTGRES_DB,
+    POSTGRES_USER,
+    POSTGRES_PASSWORD,
+    POSTGRES_POOL_MIN,
+    POSTGRES_POOL_MAX,
+    DEBUG,
+)
 
 log = logging.getLogger(__name__)
 
 # Build the asyncpg connection URL.
 _DATABASE_URL: str = (
     f"postgresql+asyncpg://"
-    f"{config.POSTGRES_USER}:{config.POSTGRES_PASSWORD}"
-    f"@{config.POSTGRES_HOST}:{config.POSTGRES_PORT}"
-    f"/{config.POSTGRES_DB}"
+    f"{POSTGRES_USER}:{POSTGRES_PASSWORD}"
+    f"@{POSTGRES_HOST}:{POSTGRES_PORT}"
+    f"/{POSTGRES_DB}"
 )
 
 
@@ -48,8 +57,8 @@ class MyPostgres:
     def __init__(self) -> None:
         self._engine = create_async_engine(
             _DATABASE_URL,
-            pool_size=config.POSTGRES_POOL_MIN,
-            max_overflow=config.POSTGRES_POOL_MAX - config.POSTGRES_POOL_MIN,
+            pool_size=POSTGRES_POOL_MIN,
+            max_overflow=POSTGRES_POOL_MAX - POSTGRES_POOL_MIN,
             echo=False,
         )
         self._session_factory = async_sessionmaker(
@@ -82,9 +91,9 @@ class MyPostgres:
             async with self._engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
 
-            if config.DEBUG:
+            if DEBUG:
                 # Auto-create all ORM tables in development.
-                from models import Base  # noqa: PLC0415  — deferred import
+                from common.models import Base  # noqa: PLC0415
 
                 async with self._engine.begin() as conn:
                     await conn.run_sync(Base.metadata.create_all)

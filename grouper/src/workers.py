@@ -15,17 +15,17 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from logging_config import setup_logging
-import config
+from common.logging_config import setup_logging
+from common import config
 from modules.module_manager import ModuleManager
-from mypostgres import MyPostgres
-from myredis import MyRedis
+from common.mypostgres import MyPostgres
+from common.myredis import MyRedis
 
 
 class _WorkerLogAdapter(logging.LoggerAdapter):
     """Injects ``worker_id`` into every log record's ``extra`` dict.
 
-    The :class:`~logging_config.FetcherFormatter` reads ``worker_id``
+    The :class:`~common.logging_config.PipelineFormatter` reads ``worker_id``
     from the record to build the ``[Grouper][N]`` prefix.
     """
 

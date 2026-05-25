@@ -1,16 +1,22 @@
 """
 Runtime configuration — all values sourced from environment / .env file.
 
-Import this module and reference module-level constants.
-e.g.  import config  →  config.REDIS_DB_HOST, config.DEBUG, etc.
+Uses ``python-dotenv``'s ``find_dotenv()`` to locate the ``.env`` file
+by walking up from the current working directory.  This works regardless
+of which package directory the process is started from.
+
+Import this module and reference module-level constants::
+
+    from common import config
+    config.REDIS_DB_HOST
+    config.DEBUG
 """
 
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-# Load .env from the project root (or current working dir).
-# python-dotenv searches CWD by default; this is explicit.
-load_dotenv()
+# find_dotenv walks up from CWD — .env can live at the repo root.
+load_dotenv(find_dotenv())
 
 # ── Redis ─────────────────────────────────────────────────────
 REDIS_DB_HOST: str = os.getenv("REDIS_HOST", "localhost")
@@ -50,6 +56,9 @@ else:
     LOG_LEVEL: str = "DEBUG" if os.getenv("DEBUG", "false").strip().lower() == "true" else "INFO"
 LOG_DIR: str = os.getenv("LOG_DIR", "logs")
 LOG_FLUSH_INTERVAL: int = int(os.getenv("LOG_FLUSH_INTERVAL", "60"))
+
+# ── Viewer ─────────────────────────────────────────────────────
+PAGE_SIZE: int = int(os.getenv("PAGE_SIZE", "25"))
 
 # ── App ────────────────────────────────────────────────────────
 DEBUG: bool = os.getenv("DEBUG", "false").strip().lower() == "true"
