@@ -60,7 +60,7 @@ async def _worker(worker_id: int) -> None:
     # ── Setup ─────────────────────────────────────────────────
     log.info("Connecting to Redis …")
     myredis = MyRedis()
-    if not await myredis.init_redis():
+    if not await myredis.init_redis(stream=config.REDIS_FETCHER_STREAM):
         log.critical("Redis unreachable — aborting")
         flusher.stop()
         return
@@ -87,7 +87,7 @@ async def _worker(worker_id: int) -> None:
 
     log.info(
         "Ready — listening on stream '%s' (group: %s, consumer: worker-%s)",
-        config.REDIS_STREAM,
+        config.REDIS_FETCHER_STREAM,
         config.REDIS_STREAM_GROUP,
         worker_id,
     )
@@ -97,7 +97,7 @@ async def _worker(worker_id: int) -> None:
     # ── Main loop ─────────────────────────────────────────────
     try:
         while True:
-            res = await myredis.dequeue_stream_next(config.REDIS_STREAM, consumer_name)
+            res = await myredis.dequeue_stream_next(config.REDIS_FETCHER_STREAM, consumer_name)
             if not res:
                 continue
 
@@ -110,7 +110,7 @@ async def _worker(worker_id: int) -> None:
             await module_manager.process(data)
 
             # ACK: mark as processed within the consumer group.
-            await myredis.ack_stream(config.REDIS_STREAM, msg_id)
+            await myredis.ack_stream(config.REDIS_FETCHER_STREAM, msg_id)
 
             # Politeness delay between tasks.
             delay = random.uniform(config.REQUEST_DELAY_MIN, config.REQUEST_DELAY_MAX)

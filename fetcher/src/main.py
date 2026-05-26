@@ -15,7 +15,7 @@ async def main():
     log = logging.getLogger(__name__)
 
     log.info("NG Fetcher starting …")
-    log.info("Redis : %s:%s  |  Stream : %s", config.REDIS_DB_HOST, config.REDIS_DB_PORT, config.REDIS_STREAM)
+    log.info("Redis : %s:%s  |  Stream : %s", config.REDIS_DB_HOST, config.REDIS_DB_PORT, config.REDIS_FETCHER_STREAM)
     log.info("PG   : %s:%s/%s", config.POSTGRES_HOST, config.POSTGRES_PORT, config.POSTGRES_DB)
     log.info("Workers : %s  |  Debug : %s  |  Log level : %s", config.NUMBER_OF_WORKERS, config.DEBUG, config.LOG_LEVEL)
    
@@ -24,7 +24,7 @@ async def main():
     loop.add_signal_handler(signal.SIGINT, main_task.cancel) # type: ignore
     loop.add_signal_handler(signal.SIGTERM, main_task.cancel) # type: ignore
     
-    log.info("Listening to incoming requests on stream: %s", config.REDIS_STREAM)
+    log.info("Listening to incoming requests on stream: %s", config.REDIS_FETCHER_STREAM)
     
     pool = ProcessPoolExecutor(
         max_workers=config.NUMBER_OF_WORKERS,

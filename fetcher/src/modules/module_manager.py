@@ -204,7 +204,7 @@ class ModuleManager:
             # 3 — OK, enqueue.
             await self.redis.mark_url_seen(link)
             await self.redis.enqueue_stream(
-                config.REDIS_STREAM,
+                config.REDIS_FETCHER_STREAM,
                 {
                     "site": link,
                     "depth": depth,
@@ -238,7 +238,7 @@ class ModuleManager:
             _jlog("task_retry", url=url, retries=retries, delay=delay)
             await asyncio.sleep(delay)
             await self.redis.enqueue_stream(
-                config.REDIS_STREAM,
+                config.REDIS_FETCHER_STREAM,
                 {
                     "site": url,
                     "depth": task.get("depth", 0),
@@ -250,7 +250,7 @@ class ModuleManager:
         else:
             _jlog("task_dead_letter", url=url, reason=reason)
             await self.redis.enqueue_stream(
-                config.REDIS_STREAM_FAILED,
+                config.REDIS_FETCHER_STREAM_FAILED,
                 {
                     "site": url,
                     "depth": task.get("depth", 0),

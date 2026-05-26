@@ -22,12 +22,21 @@ load_dotenv(find_dotenv())
 # ── Redis ─────────────────────────────────────────────────────
 REDIS_DB_HOST: str = os.getenv("REDIS_HOST", "localhost")
 REDIS_DB_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_STREAM: str = os.getenv("REDIS_STREAM", "fetcher")
-REDIS_STREAM_GROUP: str = os.getenv("REDIS_STREAM_GROUP", "fetcher-workers")
-REDIS_STREAM_FAILED: str = os.getenv("REDIS_STREAM_FAILED", "fetcher:failed")
-REDIS_SEEN_SET: str = os.getenv("REDIS_SEEN_SET", "fetcher:seen_urls")
 REDIS_POOL_MIN: int = int(os.getenv("REDIS_POOL_MIN", "2"))
 REDIS_POOL_MAX: int = int(os.getenv("REDIS_POOL_MAX", "10"))
+
+# Groups
+REDIS_STREAM_GROUP: str = os.getenv("REDIS_STREAM_GROUP", "core-workers")
+
+# Sets
+REDIS_SEEN_SET: str = os.getenv("REDIS_SEEN_SET", "fetcher:seen_urls")
+
+# Streams
+REDIS_FETCHER_STREAM: str = os.getenv("REDIS_STREAM", "fetcher")
+REDIS_FETCHER_STREAM_FAILED: str = os.getenv("REDIS_STREAM_FAILED", "fetcher:failed")
+
+REDIS_EXTRACTOR_STREAM: str = os.getenv("REDIS_STREAM", "extractor")
+REDIS_EXTRACTOR_STREAM_FAILED: str = os.getenv("REDIS_STREAM_FAILED", "extractor:failed")
 
 # ── PostgreSQL ────────────────────────────────────────────────
 POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")

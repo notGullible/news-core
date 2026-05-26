@@ -27,7 +27,6 @@ from common.config import (
     REDIS_DB_PORT,
     REDIS_POOL_MAX,
     REDIS_POOL_MIN,
-    REDIS_STREAM,
     REDIS_STREAM_GROUP,
     REDIS_SEEN_SET,
 )
@@ -49,7 +48,7 @@ class MyRedis:
         """Factory: returns a Redis client drawing from the shared pool."""
         return aioredis.Redis(connection_pool=self._redis_pool)
 
-    async def init_redis(self) -> bool:
+    async def init_redis(self, stream:str) -> bool:
         """Verify the pool connects, pre-warm connections, and ensure the
         consumer group exists on the main stream."""
         client = self.get_redis()
@@ -66,7 +65,7 @@ class MyRedis:
             # where the group already exists).
             try:
                 await client.xgroup_create(  # type: ignore
-                    REDIS_STREAM,
+                    stream,
                     REDIS_STREAM_GROUP,
                     id="0",
                     mkstream=True,

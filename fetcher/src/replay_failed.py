@@ -25,12 +25,12 @@ from common.logging_config import setup_logging
 from common.myredis import MyRedis
 
 
+log = logging.getLogger("replay_failed")
 async def main(dry_run: bool, domain_filter: str | None) -> None:
     flusher = setup_logging(-1, component="Fetcher")
-    log = logging.getLogger("replay_failed")
 
     redis = MyRedis()
-    if not await redis.init_redis():
+    if not await redis.init_redis(config.REDIS_FETCHER_STREAM_FAILED):
         log.critical("Cannot connect to Redis — aborting.")
         return
 
@@ -39,7 +39,7 @@ async def main(dry_run: bool, domain_filter: str | None) -> None:
 
     # XREAD all pending entries (non-blocking).
     while True:
-        entry = await redis._xread_one(config.REDIS_STREAM_FAILED)
+        entry = await redis._xread_one(config.REDIS_FETCHER_STREAM_FAILED)
         if not entry:
             break
 
@@ -52,7 +52,7 @@ async def main(dry_run: bool, domain_filter: str | None) -> None:
         # Optional domain filter.
         if domain_filter and domain not in domain_filter:
             skip_count += 1
-            await redis.delete_msg_stream(config.REDIS_STREAM_FAILED, msg_id)
+            await redis.delete_msg_stream(config.REDIS_FETCHER_STREAM_FAILED, msg_id)
             continue
 
         # Build a fresh task (reset retries, depth, defaults).
@@ -67,10 +67,10 @@ async def main(dry_run: bool, domain_filter: str | None) -> None:
         if dry_run:
             log.info("  [DRY-RUN] would replay: %s", url)
         else:
-            await redis.enqueue_stream(config.REDIS_STREAM, task)
+            await redis.enqueue_stream(config.REDIS_FETCHER_STREAM, task)
             log.info("  Replayed: %s", url)
 
-        await redis.delete_msg_stream(config.REDIS_STREAM_FAILED, msg_id)
+        await redis.delete_msg_stream(config.REDIS_FETCHER_STREAM_FAILED, msg_id)
         replay_count += 1
 
     log.info(
