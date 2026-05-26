@@ -16,8 +16,7 @@ import asyncio
 import logging
 import random
 import signal
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from typing import Union
+from concurrent.futures import ProcessPoolExecutor
 
 from common import config
 from common.logging_config import setup_logging
@@ -34,23 +33,24 @@ from extract import process
 
 
 async def start_workers(
-    pool_executor: Union[ProcessPoolExecutor, ThreadPoolExecutor],
+    pool_executor: ProcessPoolExecutor,
 ) -> None:
     """Launch *config.NUMBER_OF_WORKERS* workers and wait forever."""
     loop = asyncio.get_running_loop()
+
     futures = [
-        pool_executor.submit(_call_worker, i)
+        loop.run_in_executor(pool_executor, _call_worker, i)
         for i in range(config.NUMBER_OF_WORKERS)
     ]
-    awaitables = [asyncio.wrap_future(f, loop=loop) for f in futures]
-    await asyncio.gather(*awaitables)  # blocks forever
+
+    await asyncio.gather(*futures)
 
 
 # ── internal helpers ───────────────────────────────────────────────────
 
 
 def _call_worker(worker_id: int) -> None:
-    """Entry-point for each subprocess — boots the asyncio loop."""
+    """Sync entry-point for the subprocess — boots its own asyncio loop."""
     asyncio.run(_worker(worker_id))
 
 
@@ -80,6 +80,15 @@ async def _worker(worker_id: int) -> None:
     # **** Stuff Declared Here ****
     myEmbed = MyEmbeddings()
     myQdrant = MyQdrant()
+    
+
+    log.info("Connecting to Qdrant …")
+    if not await myQdrant.init_db():
+        log.critical("Qdrant unreachable — aborting")
+        await myredis.close_redispool()
+        await mypostgres.close_db()
+        flusher.stop()
+        return
 
     # ── Signal handling ───────────────────────────────────────
     loop = asyncio.get_running_loop()
@@ -163,4 +172,7 @@ async def _worker(worker_id: int) -> None:
     finally:
         await mypostgres.close_db()
         await myredis.close_redispool()
+        await myQdrant.close_db()
+        myEmbed.release_embedding_model()
+
         flusher.stop()

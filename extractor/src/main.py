@@ -7,17 +7,20 @@ import signal
 # My Imports
 from common import config
 from common.logging_config import setup_logging
-from src.workers import start_workers
-
+from workers import start_workers
+from common.myembeddings import MyEmbeddings
 
 async def main():
-    flusher = setup_logging(-1, component="Fetcher")  # main process (worker_id=-1)
+    flusher = setup_logging(-1, component="Extractor")
     log = logging.getLogger(__name__)
 
-    log.info("NG Fetcher starting …")
+    log.info("NG Extractor starting …")
     log.info("Redis : %s:%s  |  Stream : %s", config.REDIS_DB_HOST, config.REDIS_DB_PORT, config.REDIS_EXTRACTOR_STREAM)
     log.info("PG   : %s:%s/%s", config.POSTGRES_HOST, config.POSTGRES_PORT, config.POSTGRES_DB)
     log.info("Workers : %s  |  Debug : %s  |  Log level : %s", config.NUMBER_OF_WORKERS, config.DEBUG, config.LOG_LEVEL)
+    log.info("Loading Embedding Model, to install if not;  %s", config.EMBEDDING_MODEL_NAME)
+    MyEmbeddings().release_embedding_model()
+
    
     loop = asyncio.get_running_loop()
     main_task = asyncio.current_task()

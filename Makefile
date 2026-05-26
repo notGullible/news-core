@@ -1,4 +1,4 @@
-.PHONY: up down reset reset-redis reset-pg seed scrape test grouper viewer
+.PHONY: up down reset reset-redis reset-pg seed scrape test grouper viewer extractor seed-fetcher seed-extractor
 
 # ── Infrastructure ──────────────────────────────────────────
 
@@ -30,7 +30,7 @@ reset-all-bad:
 
 # ── Pipeline ────────────────────────────────────────────────
 
-seed:
+seed-fetcher:
 	cd fetcher && uv run python src/loader.py
 
 scrape:
@@ -53,3 +53,9 @@ grouper:
 # Viewer
 viewer:
 	cd viewer/src && uv run uvicorn main:app --host 0.0.0.0 --port 8080
+
+extractor:
+	cd extractor && uv run python src/main.py
+
+seed-extractor:
+	cd extractor && uv run python src/loader.py

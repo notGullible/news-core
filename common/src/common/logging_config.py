@@ -131,6 +131,7 @@ class _NoopFlusher(_PeriodicFlusher):
 def setup_logging(
     worker_id: int,
     component: str = "Pipeline",
+    log_level:str = LOG_LEVEL
 ) -> _PeriodicFlusher:
     """Configure universal logging for the current OS process.
 
@@ -161,7 +162,7 @@ def setup_logging(
     log_file = "main.log" if worker_id < 0 else f"worker-{worker_id}.log"
     file_path = log_dir / log_file
 
-    level = getattr(logging, LOG_LEVEL, logging.INFO)
+    level = getattr(logging, log_level, logging.INFO)
     formatter = PipelineFormatter(fmt=LOG_FMT, datefmt=DATE_FMT)
 
     # Stream handler → stdout.

@@ -32,11 +32,11 @@ REDIS_STREAM_GROUP: str = os.getenv("REDIS_STREAM_GROUP", "core-workers")
 REDIS_SEEN_SET: str = os.getenv("REDIS_SEEN_SET", "fetcher:seen_urls")
 
 # Streams
-REDIS_FETCHER_STREAM: str = os.getenv("REDIS_STREAM", "fetcher")
-REDIS_FETCHER_STREAM_FAILED: str = os.getenv("REDIS_STREAM_FAILED", "fetcher:failed")
+REDIS_FETCHER_STREAM: str = os.getenv("REDIS_FETCHER_STREAM", "fetcher")
+REDIS_FETCHER_STREAM_FAILED: str = os.getenv("REDIS_FETCHER_STREAM_FAILED", "fetcher:failed")
 
-REDIS_EXTRACTOR_STREAM: str = os.getenv("REDIS_STREAM", "extractor")
-REDIS_EXTRACTOR_STREAM_FAILED: str = os.getenv("REDIS_STREAM_FAILED", "extractor:failed")
+REDIS_EXTRACTOR_STREAM: str = os.getenv("REDIS_EXTRACTOR_STREAM", "extractor")
+REDIS_EXTRACTOR_STREAM_FAILED: str = os.getenv("REDIS_EXTRACTOR_STREAM_FAILED", "extractor:failed")
 
 # ── PostgreSQL ────────────────────────────────────────────────
 POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")

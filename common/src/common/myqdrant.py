@@ -142,7 +142,8 @@ class MyQdrant:
         """Create *collection_name* if it does not already exist.
 
         Idempotent — if the collection already exists and its vector
-        config matches, this is a no-op.
+        config matches, this is a no-op.  Handles the race where
+        multiple workers call this concurrently.
 
         Args:
             collection_name: Name of the collection to create/verify.
@@ -152,11 +153,16 @@ class MyQdrant:
         if vector_size is None:
             vector_size = self.embed_dim
 
+        # ── Fast path: collection already exists ──────────
         try:
             await self._client.get_collection(collection_name)
-            # Collection exists — nothing to do.
             log.debug("Collection '%s' already exists", collection_name)
+            return
         except (UnexpectedResponse, ValueError):
+            pass  # not found — proceed to create
+
+        # ── Create (handle concurrent-create race) ────────
+        try:
             await self._client.create_collection(
                 collection_name=collection_name,
                 vectors_config=qmodels.VectorParams(
@@ -170,6 +176,15 @@ class MyQdrant:
                 vector_size,
                 distance,
             )
+        except UnexpectedResponse as exc:
+            # 409 Conflict → another worker beat us to it.  That's fine.
+            if getattr(exc, "status_code", None) == 409:
+                log.debug(
+                    "Collection '%s' created by another worker — continuing",
+                    collection_name,
+                )
+                return
+            raise
 
     async def collection_exists(self, collection_name: str) -> bool:
         """Return True if *collection_name* exists."""
