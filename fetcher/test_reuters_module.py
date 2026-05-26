@@ -39,12 +39,17 @@ EXPECTED_HEADLINE = (
 )
 
 EXPECTED_CONTENT = (
+    "<section>\n\n"
+    "<title>\n\n"
     "Summary\n\n"
+    "</title>\n\n"
     "Trump says sources tracked al-Minuki's movements\n\n"
     "Al-Minuki was labeled a 'specially designated global terrorist' "
     "by the Biden administration in 2023\n\n"
     "US increased drone and troop presence in Nigeria after December "
     "strikes on militants\n\n"
+    "</section>\n\n"
+    "<section>\n\n"
     "May 15 (Reuters) - U.S. President Donald Trump said on Friday "
     "that Abu-Bilal al-Minuki, second in command of ISIS globally, "
     "was killed in an operation conducted by U.S. and Nigerian forces.\n\n"
@@ -73,7 +78,8 @@ EXPECTED_CONTENT = (
     "Nigerian military officials said earlier this year.\n\n"
     "Reporting by Shubham Kalia in Bengaluru; Editing by William Mallard, "
     "Muralikumar Anantharaman and Tom Hogue\n\n"
-    "Our Standards: The Thomson Reuters Trust Principles."
+    "Our Standards: The Thomson Reuters Trust Principles.\n\n"
+    "</section>"
 )
 
 
@@ -149,20 +155,30 @@ def test_skips_promo_box() -> None:
     )
 
 
-def test_includes_summary_bullets() -> None:
-    """The Summary widget bullets must appear at the top of content."""
+def test_content_has_section_structure() -> None:
+    """Content must be wrapped in <section> tags with <title> for named sections."""
     soup = load_soup(ARTICLE_HTML)
     mod = ReutersModule()
     mod.domain = "reuters.com"
     result = mod.extract(soup, ARTICLE_URL)
     assert result is not None
     assert result.content is not None
-    assert result.content.startswith("Summary\n\n"), (
-        "Content should start with Summary heading"
+    # Content must start with a <section> tag.
+    assert result.content.startswith("<section>"), (
+        "Content should start with <section> tag"
     )
-    assert "Trump says sources tracked al-Minuki's movements" in result.content
-    assert "specially designated global terrorist" in result.content
-    assert "US increased drone and troop presence in Nigeria" in result.content
+    # Content must end with a </section> tag.
+    assert result.content.rstrip().endswith("</section>"), (
+        "Content should end with </section> tag"
+    )
+    # Must have exactly as many <section> as </section>.
+    assert result.content.count("<section>") == result.content.count("</section>"), (
+        "Mismatched <section> / </section> count"
+    )
+    # Every <title> must have a closing </title>.
+    assert result.content.count("<title>") == result.content.count("</title>"), (
+        "Mismatched <title> / </title> count"
+    )
 
 
 def test_content_length() -> None:
@@ -204,7 +220,7 @@ if __name__ == "__main__":
         ("content_hash", test_content_hash_is_computed),
         ("no_invisible_chars", test_content_has_no_invisible_chars),
         ("skips_promo_box", test_skips_promo_box),
-        ("includes_summary", test_includes_summary_bullets),
+        ("section_structure", test_content_has_section_structure),
         ("content_length", test_content_length),
         ("url_and_domain", test_url_and_domain_set),
         ("module_registered", test_module_registered),

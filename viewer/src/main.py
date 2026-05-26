@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -16,7 +17,22 @@ app = FastAPI(
 )
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
-jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), autoescape=True)
+
+
+# ── Custom filters ────────────────────────────────────────────────────
+
+def _strip_tags(text: str | None) -> str:
+    """Strip <section>/<title> markup tags for plain-text previews."""
+    if not text:
+        return ""
+    for tag in ("<section>", "</section>", "<title>", "</title>"):
+        text = text.replace(tag, "")
+    # Collapse multiple blank lines.
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+jinja_env.filters["strip_tags"] = _strip_tags
 
 
 def render(name: str, request: Request, **context) -> HTMLResponse:

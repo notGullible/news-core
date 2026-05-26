@@ -37,11 +37,9 @@
   <!-- Content -->
   <section class="px-6 sm:px-8 py-6 sm:py-8">
     {% if article.content %}
-    <div class="prose prose-invert prose-sm sm:prose-base max-w-none
-                prose-headings:text-gray-100 prose-p:text-gray-300 prose-p:leading-relaxed
-                prose-strong:text-gray-200 prose-li:text-gray-300">
-      {% for para in article.content.split('\n\n') %}
-      <p class="mb-4 last:mb-0">{{ para }}</p>
+    <div class="max-w-none text-gray-300 leading-relaxed">
+      {% for line in article.content.split('\n\n') %}
+      <p class="mb-3 last:mb-0">{{ line }}</p>
       {% endfor %}
     </div>
     {% else %}

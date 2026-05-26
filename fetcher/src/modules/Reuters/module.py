@@ -125,13 +125,29 @@ class ReutersModule(BaseModule):
             if tid == "ContextWidget":
                 summary_tab = child.find("li", attrs={"data-testid": "summary-tab"})
                 if summary_tab:
+                    parts.append("<section>")
+                    parts.append("<title>")
                     parts.append(self._clean_text(_txt(summary_tab)))
+                    parts.append("</title>")
                 summary_list = child.find("ul", attrs={"data-testid": "Summary"})
                 if summary_list:
                     for li in summary_list.find_all("li", recursive=False):
                         text = self._clean_text(_txt(li))
                         if text:
                             parts.append(text)
+                    parts.append("</section>")
+                    parts.append("<section>") # Because after the summary there is a block with no title, but treated as a single section
+                continue
+
+            # ── Headings (section breaks) ───────────────────
+            if child.name in ("h2", "h3", "h4"):
+                text = self._clean_text(_txt(child))
+                if text:
+                    parts.append("</section>") # Because this closes that title-less section and allows titled section too .. last /section block is at end
+                    parts.append("<section>")
+                    parts.append("<title>")
+                    parts.append(text)
+                    parts.append("</title>")
                 continue
 
             # ── Paragraph blocks ────────────────────────────
@@ -172,12 +188,6 @@ class ReutersModule(BaseModule):
                     parts.append(text)
                     continue
 
-            # ── Headings (section breaks) ───────────────────
-            if child.name in ("h2", "h3", "h4"):
-                text = self._clean_text(_txt(child))
-                if text:
-                    parts.append(text)
-                continue
 
             # ── Explicit skips ──────────────────────────────
             if tid == "promo-box":
@@ -188,7 +198,7 @@ class ReutersModule(BaseModule):
                 continue
             if tid == "ArticleBodyRow":
                 continue
-
+        parts.append("</section>")
         return "\n\n".join(parts) if parts else None
 
 

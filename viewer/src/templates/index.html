@@ -54,8 +54,9 @@
         <h2 class="text-sm font-semibold text-gray-100 group-hover:text-emerald-400 transition line-clamp-2 mb-1">
           {{ a.headline or "(no headline)" }}
         </h2>
+        {% set preview = (a.content or "") | strip_tags %}
         <p class="text-xs text-gray-500 line-clamp-2 leading-relaxed">
-          {{ (a.content or "")[:250] }}{% if a.content and a.content|length > 250 %}&hellip;{% endif %}
+          {{ preview[:250] }}{% if preview|length > 250 %}&hellip;{% endif %}
         </p>
       </div>
       <div class="shrink-0 flex flex-col items-end gap-1.5 text-[11px]">

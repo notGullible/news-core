@@ -26,7 +26,7 @@ async def main() -> None:
     log = logging.getLogger("reset_redis")
 
     redis = MyRedis()
-    if not await redis.init_redis():
+    if not await redis.init_redis(config.REDIS_FETCHER_STREAM):
         log.critical("Cannot connect to Redis — aborting.")
         sys.exit(1)
 

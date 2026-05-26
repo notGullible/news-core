@@ -18,14 +18,14 @@ async def main():
     log.info("Connecting to Redis")
     log.info("Host: %s | Port: %s", config.REDIS_DB_HOST, config.REDIS_DB_PORT)
     myredis = MyRedis()
-    if not await myredis.init_redis():
+    if not await myredis.init_redis(config.REDIS_FETCHER_STREAM):
         log.critical("Couldnt connect to REDIS")
         flusher.stop()
         return
 
-    log.info("Sending... requests on stream: %s", config.REDIS_STREAM)
+    log.info("Sending... requests on stream: %s", config.REDIS_FETCHER_STREAM)
     for site in sites.qualified_news:
-        msg_id = await myredis.enqueue_stream(config.REDIS_STREAM, {"site":site})        
+        msg_id = await myredis.enqueue_stream(config.REDIS_FETCHER_STREAM, {"site":site})        
         log.info("Added Site: %s to Redis | MsgID: %s", site, msg_id, extra={"url": site})
     
     log.info("Submitted All sites to the REDIS Queue !!")
