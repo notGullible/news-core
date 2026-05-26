@@ -7,7 +7,7 @@ import signal
 # My Imports
 from common import config
 from common.logging_config import setup_logging
-from workers import start_workers
+from src.workers import start_workers
 
 
 async def main():

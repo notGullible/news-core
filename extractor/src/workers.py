@@ -21,9 +21,14 @@ from typing import Union
 
 from common import config
 from common.logging_config import setup_logging
+from common.models import Article
+from common.myembeddings import MyEmbeddings
 from common.mypostgres import MyPostgres
+from common.myqdrant import MyQdrant
 from common.myredis import MyRedis
+from sqlalchemy import select
 
+from extract import process
 
 # ── public entry point ─────────────────────────────────────────────────
 
@@ -73,6 +78,8 @@ async def _worker(worker_id: int) -> None:
         return
 
     # **** Stuff Declared Here ****
+    myEmbed = MyEmbeddings()
+    myQdrant = MyQdrant()
 
     # ── Signal handling ───────────────────────────────────────
     loop = asyncio.get_running_loop()
@@ -99,12 +106,50 @@ async def _worker(worker_id: int) -> None:
             msg_id = res["msg_id"]
             data = res["data"]
 
-            url = data.get("site", "?")
+            url = data.get("url", "?")
+            article_id = int(data.get("article_id", "0"))
+            source_domain = data.get("source_domain", "?")
+
+            if not article_id:
+                log.warning("Skipping message [%s] — missing article_id", msg_id)
+                await myredis.ack_stream(config.REDIS_EXTRACTOR_STREAM, msg_id)
+                continue
+
+            # ── Fetch the full article row from PostgreSQL ──────
+            async with mypostgres.get_session() as session:
+                result = await session.execute(
+                    select(Article.headline, Article.content).where(Article.id == article_id)  # type: ignore[arg-type]
+                )
+                row = result.one_or_none()
+
+            if row is None:
+                log.warning(
+                    "Skipping article %s — not found in PostgreSQL", article_id
+                )
+                await myredis.ack_stream(config.REDIS_EXTRACTOR_STREAM, msg_id)
+                continue
+
+            headline, content = row
+            if not content:
+                log.info(
+                    "Skipping article %s — empty content", article_id, extra={"url": url}
+                )
+                await myredis.ack_stream(config.REDIS_EXTRACTOR_STREAM, msg_id)
+                continue
+
             log.info("Processing [%s] %s", msg_id, url, extra={"url": url})
 
-            # ********** Work Done HERE **********
-            # await module_manager.process(data)
-            # ************************************
+            await process(
+                article_id=article_id,
+                url=url,
+                source_domain=source_domain,
+                headline=headline,
+                content=content,
+                myembeddings=myEmbed,
+                myqdrant=myQdrant,
+                collection_name=config.QDRANT_DEFAULT_COLLECTION,
+            )
+            
 
             # ACK: mark as processed within the consumer group.
             await myredis.ack_stream(config.REDIS_EXTRACTOR_STREAM, msg_id)
