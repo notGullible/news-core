@@ -326,12 +326,44 @@ def _extract_content(self, soup):
     return "\n\n".join(paragraphs) if paragraphs else None
 ```
 
-#### Recipe C: Content uses numbered paragraph blocks (like Reuters 2026)
+#### Recipe C: Content uses numbered paragraph blocks with section tagging (like Reuters 2026)
 
 Reuters wraps article text in an outer container with a nested
 content wrapper.  You must **descend into the content wrapper** —
 walking the outer container's direct children only finds structural
 chrome (images, toolbars), not the paragraphs themselves.
+
+**All modules MUST produce structured output** using ``<section>``
+and ``<title>`` tags to segment the article into logical parts.
+Each heading or semantic block opens a new ``<section>``; an untitled
+``<section>`` carries body text between headings.  Tags are on their
+own lines, joined with ``\n\n``, producing output like:
+
+```text
+<section>
+
+<title>
+
+Summary
+
+</title>
+
+Key point one
+
+Key point two
+
+</section>
+
+<section>
+
+First paragraph text …
+
+Second paragraph text …
+
+</section>
+```
+
+Pattern implementation:
 
 ```python
 def _extract_content(self, soup):
@@ -358,24 +390,54 @@ def _extract_content(self, soup):
     if not content:
         content = container  # fallback
 
-    # 3 — walk direct children of the content wrapper.
+    # 3 — walk direct children, producing section-structured output.
     parts = []
+    has_open_section = False
+
     for child in content.find_all(recursive=False):
         tid = child.get("data-testid", "")
 
-        # Paragraph blocks (data-testid="paragraph-0", "paragraph-1", …)
+        # Semantic block with a title → own <section>.
+        if tid == "ContextWidget":
+            tab = child.find("li", attrs={"data-testid": "summary-tab"})
+            if tab:
+                if has_open_section:
+                    parts.append("</section>")
+                parts.append("<section>")
+                parts.append("<title>")
+                parts.append(tab.get_text(separator=" ", strip=True))
+                parts.append("</title>")
+                has_open_section = True
+            # … bullet items …
+            if has_open_section:
+                parts.append("</section>")
+                parts.append("<section>")  # untitled body section follows
+                has_open_section = True
+            continue
+
+        # Headings — close current, open new titled section.
+        if child.name in ("h2", "h3", "h4"):
+            text = child.get_text(separator=" ", strip=True)
+            if text:
+                parts.append("</section>")
+                parts.append("<section>")
+                parts.append("<title>")
+                parts.append(text)
+                parts.append("</title>")
+                has_open_section = True
+            continue
+
+        # Paragraph blocks — body content within the current section.
         if tid.startswith("paragraph-"):
-            # Use separator=" " so inline <a> tags don't swallow spaces.
+            if not has_open_section:
+                parts.append("<section>")
+                has_open_section = True
             text = child.get_text(separator=" ", strip=True)
             if text:
                 parts.append(text)
 
-        # Headings embedded between paragraphs.
-        elif child.name in ("h2", "h3", "h4"):
-            text = child.get_text(separator=" ", strip=True)
-            if text:
-                parts.append(text)
-
+    if has_open_section:
+        parts.append("</section>")  # close the final section
     return "\n\n".join(parts) if parts else None
 ```
 
@@ -970,22 +1032,39 @@ class ReutersModule(BaseModule):
         if not content_div:
             content_div = container  # fallback for older structure
 
-        # 3 — walk children in document order.
+        # 3 — walk children in document order, producing a
+        #     section-structured output.
         parts: list[str] = []
         for child in content_div.find_all(recursive=False):
             tid = child.get("data-testid", "")
 
-            # Summary widget (bullet points).
+            # Summary widget (bullet points) — own titled section.
             if tid == "ContextWidget":
                 tab = child.find("li", attrs={"data-testid": "summary-tab"})
                 if tab:
+                    parts.append("<section>")
+                    parts.append("<title>")
                     parts.append(self._clean_text(_txt(tab)))
+                    parts.append("</title>")
                 ul = child.find("ul", attrs={"data-testid": "Summary"})
                 if ul:
                     for li in ul.find_all("li", recursive=False):
                         t = self._clean_text(_txt(li))
                         if t:
                             parts.append(t)
+                    parts.append("</section>")
+                    parts.append("<section>")  # open untitled body section
+                continue
+
+            # Headings — close current section, open new titled one.
+            if child.name in ("h2", "h3", "h4"):
+                t = self._clean_text(_txt(child))
+                if t:
+                    parts.append("</section>")
+                    parts.append("<section>")
+                    parts.append("<title>")
+                    parts.append(t)
+                    parts.append("</title>")
                 continue
 
             # Numbered paragraph blocks.
@@ -1022,13 +1101,6 @@ class ReutersModule(BaseModule):
                     parts.append(t)
                     continue
 
-            # Headings.
-            if child.name in ("h2", "h3", "h4"):
-                t = self._clean_text(_txt(child))
-                if t:
-                    parts.append(t)
-                continue
-
             # Explicit skips (promo-box, empty element divs, nav, toolbar).
             if tid in ("promo-box",):
                 continue
@@ -1037,6 +1109,7 @@ class ReutersModule(BaseModule):
             if child.name == "nav" or tid == "ArticleBodyRow":
                 continue
 
+        parts.append("</section>")  # close the final section
         return "\n\n".join(parts) if parts else None
 
     # ── section ─────────────────────────────────────────────────
@@ -1088,9 +1161,14 @@ class ReutersWWWModule(ReutersModule):
 - `extract_links()` — standard `<a href>` extraction works
 - `_extract_date()` — meta-tag approach works
 
-### What ReutersModule DOES override (new)
+### What ReutersModule DOES override
 
-- ``MAX_ARTICLE_LINKS`` — raised to 30 (from default 4) because
+- ``_extract_headline()`` — strips the ``" | Reuters"`` / ``" - Reuters"`` suffix.
+- ``_extract_content()`` — walks the Reuters paragraph DOM and produces
+  **section-structured output** with ``<section>`` and ``<title>`` tags.
+- ``_extract_section()`` — adds Reuters-specific breadcrumb selectors.
+- ``_extract_author()`` — adds Reuters byline selectors, strips ``"By "`` prefix.
+- ``MAX_ARTICLE_LINKS`` — raised to 10 (from default 4) because
   Reuters article pages carry 4–15 sidebar links that otherwise
   trigger false listing detection.
 - ``is_listing_page()`` — path-equality check against
@@ -1111,6 +1189,14 @@ class ReutersWWWModule(ReutersModule):
   (images, toolbars).  Real content is one level deeper in
   ``article-body-module__content__*``.  Walking the wrong level
   silently produces empty content.
+* **Section-structured output:** Content is segmented with
+  ``<section>`` / ``</section>`` and ``<title>`` / ``</title>`` tags.
+  Each semantic heading opens a new titled section; the untitled
+  body between headings lives in its own ``<section>``.  Tags are
+  plain-text tokens (not nested HTML) joined by ``\n\n``.  This
+  preserves document structure for downstream consumers (embedders,
+  summarisers, chunkers) without requiring them to re-parse the
+  original DOM.
 * **``get_text(separator=" ", strip=True)``:** Paragraphs contain
   inline ``<a>`` tags ("President ``<a>``Donald Trump``</a>`` said").
   Without ``separator=" "`` the space around the link disappears.
@@ -1120,10 +1206,8 @@ class ReutersWWWModule(ReutersModule):
 * **Decompose hidden spans:** The trust badge's ``<a>`` contains a
   ``<span style="clip:rect(0 0 0 0)">, opens new tab</span>`` for
   screen readers.  Decompose it before ``get_text()``.
-* **Include, don't skip:** The old module filtered out "Reporting
-  by…" and "Our Standards…" as boilerplate.  We now include
-  everything that is part of the article — the downstream consumer
-  decides what to display.
+* **Include, don't skip:** We include everything that is part of
+  the article body — the downstream consumer decides what to display.
 
 **Lesson:** Only override what's broken. Start with an empty subclass.
 
@@ -1324,6 +1408,8 @@ class <SiteName>Module(BaseModule):
 - [ ] `extract_links()` returns URLs under the seed prefix
 - [ ] Links don't include fragments, self-references, or `/undefined`
 - [ ] `content_hash` is consistent for the same content
+- [ ] Content uses ``<section>`` / ``</section>`` and ``<title>`` / ``</title>`` tags
+- [ ] Every ``<section>`` has a matching ``</section>``; every ``<title>`` has a matching ``</title>``
 - [ ] `fetch()` returns a `BeautifulSoup` for a real URL
 - [ ] `fetch()` handles failure gracefully (returns `None`)
 - [ ] Custom `fetch()` override accepts `FetchContext` as second parameter
