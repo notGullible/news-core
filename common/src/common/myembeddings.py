@@ -1,23 +1,5 @@
-"""Text embedding model manager.
+"""Text embedding model manager."""
 
-Mirrors the pattern in myredis.py / mypostgres.py / myqdrant.py: a shared
-model instance with init/close lifecycle and high-level embed / chunk /
-batch operations for the NG pipeline.
-
-Usage::
-
-    emb = MyEmbeddings()
-    if not await emb.init_db():
-        log.critical("Embedding model failed to load")
-    ...
-    vec = emb.embed("Some article headline")
-    vecs = emb.embed_batch(["text one", "text two"])
-    long_vec = emb.embed_long_text("A very long document ...")
-    ...
-    await emb.close_db()
-"""
-
-from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Sequence
@@ -35,51 +17,6 @@ log = logging.getLogger(__name__)
 
 _DEFAULT_CHUNK_OVERLAP: int = 50   # tokens of overlap between consecutive chunks
 
-# ── Embedding-dimension lookup ───────────────────────────────────────
-# Known dimensions for popular sentence-transformers models.
-# This lets :func:`get_embedding_dim` answer instantly without loading
-# the full model.  When :class:`MyEmbeddings` loads a model, the cache
-# is updated with the actual dimension.
-
-_MODEL_DIMS: dict[str, int] = {
-    "all-MiniLM-L6-v2": 384,
-    "all-MiniLM-L12-v2": 384,
-    "all-mpnet-base-v2": 768,
-    "multi-qa-MiniLM-L6-cos-v1": 384,
-    "multi-qa-mpnet-base-dot-v1": 768,
-    "all-distilroberta-v1": 768,
-    "paraphrase-MiniLM-L6-v2": 384,
-    "paraphrase-multilingual-MiniLM-L12-v2": 384,
-    "clip-ViT-B-32": 512,
-}
-
-
-def get_embedding_dim(model_name: str | None = None) -> int:
-    """Return the embedding dimension for *model_name*.
-
-    Looks up a built-in table of known sentence-transformers models
-    first (instant, no I/O).  For unknown models returns 384 — a safe
-    default for most BERT-derived sentence encoders — and logs a
-    warning.  Pass ``vector_size`` explicitly to
-    :meth:`MyQdrant.ensure_collection` if you need a different value.
-
-    When :meth:`MyEmbeddings.init_db` successfully loads a model the
-    cache is updated with the real dimension, so subsequent calls
-    always return the exact value.
-    """
-    name = model_name or EMBEDDING_MODEL_NAME
-    if name in _MODEL_DIMS:
-        return _MODEL_DIMS[name]
-
-    log.warning(
-        "Unknown embedding dimension for model '%s' — "
-        "returning default 384.  Pass vector_size explicitly "
-        "to MyQdrant.ensure_collection() to override.",
-        name,
-    )
-    return 384
-
-
 class MyEmbeddings:
     """Thin wrapper around a ``SentenceTransformer`` model.
 
@@ -92,8 +29,32 @@ class MyEmbeddings:
     def __init__(self) -> None:
         self._model: SentenceTransformer | None = None
         self._model_name: str = EMBEDDING_MODEL_NAME
+        self._embed_dim: int
+        self._max_seq_len:int
 
-    # ── model access ──────────────────────────────────────────
+        try:
+            from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+
+            log.info("Loading embedding model '%s' …", self._model_name)
+            self._model = SentenceTransformer(self._model_name)
+            embed_dim = self.get_model().get_embedding_dimension()
+            assert embed_dim is not None, log.exception("Unknown Embedding Dimension for model: '%s'", self._model_name)
+            self._embed_dim = embed_dim
+
+            max_seq_len = self.get_model().max_seq_length
+            assert max_seq_len is not None, log.exception("Unknown Max Sequence Length for model: '%s'", self._model_name)
+            self._max_seq_len = max_seq_len
+            
+            log.info(
+                "Model loaded — max_seq_length=%s, dim=%s",
+                self._model.max_seq_length,
+                self._embed_dim,
+            )
+            
+        except Exception:
+            log.exception("Could not load embedding model '%s'", self._model_name)
+            
+    
 
     def get_model(self) -> SentenceTransformer:
         """Return the loaded model.  Raises RuntimeError if not yet initialised."""
@@ -101,50 +62,12 @@ class MyEmbeddings:
             raise RuntimeError("Model not loaded — call init_db() first")
         return self._model
 
-    # ── lifecycle ─────────────────────────────────────────────
 
-    async def init_db(self) -> bool:
-        """Load the embedding model into memory.
-
-        The first call downloads the model from HuggingFace Hub
-        (~90 MB for all-MiniLM-L6-v2) and may take a few seconds.
-
-        Returns True on success, False on failure.
-        """
-        try:
-            from sentence_transformers import SentenceTransformer  # noqa: PLC0415
-
-            log.info("Loading embedding model '%s' …", self._model_name)
-            self._model = SentenceTransformer(self._model_name)
-            dim = self._model.get_sentence_embedding_dimension()
-            _MODEL_DIMS[self._model_name] = dim  # update shared cache
-            log.info(
-                "Model loaded — max_seq_length=%s, dim=%s",
-                self._model.max_seq_length,
-                dim,
-            )
-            return True
-
-        except Exception:
-            log.exception("Could not load embedding model '%s'", self._model_name)
-            return False
-
-    async def close_db(self) -> None:
-        """Release the model (no-op — kept for lifecycle symmetry)."""
+    def release_embedding_model(self) -> None:
+        """Release the model (However Keeps all the metadata like embed dim and sort)."""
         self._model = None
         log.info("Released embedding model")
 
-    @property
-    def vector_size(self) -> int:
-        """Dimensionality of the embeddings produced by this model."""
-        return self.get_model().get_sentence_embedding_dimension()
-
-    @property
-    def max_seq_length(self) -> int:
-        """Maximum token length the model accepts per input."""
-        return self.get_model().max_seq_length
-
-    # ── embedding ──────────────────────────────────────────────
 
     def embed(self, text: str) -> list[float]:
         """Return the embedding vector for a single *text* string.
@@ -176,7 +99,6 @@ class MyEmbeddings:
     def chunk_text(
         self,
         text: str,
-        max_tokens: int | None = None,
         overlap: int = _DEFAULT_CHUNK_OVERLAP,
     ) -> list[str]:
         """Split *text* into token-aware chunks that fit the model.
@@ -196,8 +118,7 @@ class MyEmbeddings:
             List of text chunks, each ≤ *max_tokens* tokens.
         """
         model = self.get_model()
-        if max_tokens is None:
-            max_tokens = model.max_seq_length
+        max_tokens = self._max_seq_len
 
         tokenizer = model.tokenizer
         tokens = tokenizer.encode(text, add_special_tokens=False)
@@ -222,7 +143,6 @@ class MyEmbeddings:
     def embed_long_text(
         self,
         text: str,
-        max_tokens: int | None = None,
         overlap: int = _DEFAULT_CHUNK_OVERLAP,
     ) -> list[float]:
         """Embed a document longer than ``max_seq_length``.
@@ -240,7 +160,7 @@ class MyEmbeddings:
         Returns:
             A single embedding vector representing the full document.
         """
-        chunks = self.chunk_text(text, max_tokens=max_tokens, overlap=overlap)
+        chunks = self.chunk_text(text, overlap=overlap)
 
         if len(chunks) == 1:
             return self.embed(chunks[0])

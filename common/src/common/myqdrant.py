@@ -34,11 +34,11 @@ from common.config import (
     QDRANT_API_KEY,
     QDRANT_USE_TLS,
     QDRANT_DEFAULT_COLLECTION,
-    EMBEDDING_DEFAULT_DISTANCE
+    EMBEDDING_DEFAULT_DISTANCE,
     DEBUG,
 )
-from common.myembeddings import get_embedding_dim
 
+from common.myembeddings import MyEmbeddings
 if TYPE_CHECKING:
     from qdrant_client.http.models import (
         PointStruct,
@@ -79,6 +79,10 @@ class MyQdrant:
             url=url,
             api_key=QDRANT_API_KEY,
         )
+        myEmbedd = MyEmbeddings()
+        self.embed_dim = myEmbedd._embed_dim
+        myEmbedd.release_embedding_model()
+        
 
     # ── client access ──────────────────────────────────────────
 
@@ -105,7 +109,7 @@ class MyQdrant:
             if DEBUG:
                 await self.ensure_collection(
                     collection_name=QDRANT_DEFAULT_COLLECTION,
-                    vector_size=get_embedding_dim(),
+                    vector_size=self.embed_dim,
                     distance=_DEFAULT_DISTANCE,
                 )
                 log.info(
@@ -146,7 +150,7 @@ class MyQdrant:
             distance: Distance metric (Cosine, Dot, Euclidean).
         """
         if vector_size is None:
-            vector_size = get_embedding_dim()
+            vector_size = self.embed_dim
 
         try:
             await self._client.get_collection(collection_name)

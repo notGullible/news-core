@@ -9,7 +9,7 @@ dependencies = [
     "asyncpg>=0.30",
     "python-dotenv>=1.0",
     "qdrant-client>=1.14",
-    "sentence-transformers>=3.0",
+    "sentence-transformers>=5.5.1",
 ]
 
 [build-system]
