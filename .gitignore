@@ -1,3 +1,5 @@
 typings
 pi-*
 .env
+
+__pycache__
